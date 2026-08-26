@@ -1,0 +1,52 @@
+# COMP0248 CW1 LSA experiment queue.
+# Format: <run-name>|<config>|<extra train args>
+# Ordered by marginal value, so if the GPU is lost the surviving results are the ones that
+# matter most. Every run uses the SAME 60-epoch budget: mixing schedules across ablations
+# would confound the comparison with an optimisation-budget effect.
+#
+# --- mandatory (LSA p8) ------------------------------------------------------------------
+e1|e1.yaml|
+e3|e3.yaml|
+# --- seed variance: without this, no ablation delta below can be interpreted ---------------
+e1_s1|e1.yaml|--seed 1
+e3_s1|e3.yaml|--seed 1
+# --- block B: leave-one-out attribution of the CPR gain ------------------------------------
+b1_no_colour|e3.yaml|--cpr-stages exposure,noise,satihue,sharpblur,resample,jpeg,chroma
+b2_no_noise|e3.yaml|--cpr-stages wb,exposure,ccm,gamma,tone,satihue,sharpblur,resample,jpeg,chroma
+b3_no_sharpblur|e3.yaml|--cpr-stages wb,exposure,ccm,noise,gamma,tone,satihue,resample,jpeg,chroma
+b4_no_resample|e3.yaml|--cpr-stages wb,exposure,ccm,noise,gamma,tone,satihue,sharpblur,jpeg,chroma
+b5_no_jpeg|e3.yaml|--cpr-stages wb,exposure,ccm,noise,gamma,tone,satihue,sharpblur,resample,chroma
+# --- block D: competing randomisers, same budget, same everything else ---------------------
+d1_randconv|e1.yaml|--photometric randconv
+d2_aprs|e1.yaml|--photometric aprs
+d4_augmix|e1.yaml|--photometric augmix
+# --- block E: architecture and loss ablations ---------------------------------------------
+e_nomap|e3.yaml|--no-mask-attn-pool
+e_singletask_cls|e1.yaml|--heads cls
+e_uncertainty|e3.yaml|--loss-weighting uncertainty
+# --- block C: normalisation, crossed with the strongest augmentation -----------------------
+c_gn|e3.yaml|--norm gn
+c_ibn|e3.yaml|--norm ibn
+# --- block A: the bottom of the additive ladder --------------------------------------------
+a0_none|e1.yaml|--photometric none
+# --- second seeds and the remaining block-B rows -------------------------------------------
+e1_s2|e1.yaml|--seed 2
+e3_s2|e3.yaml|--seed 2
+b6_no_satihue|e3.yaml|--cpr-stages wb,exposure,ccm,noise,gamma,tone,sharpblur,resample,jpeg,chroma
+b7_no_exp_chroma|e3.yaml|--cpr-stages wb,ccm,noise,gamma,tone,satihue,sharpblur,resample,jpeg
+# --- block A: the additive ladder, so Block B's leave-one-out has a build-up to compare to ---
+a2_linear_isp|e3.yaml|--cpr-stages wb,exposure,ccm,gamma,tone
+a3_degrade|e3.yaml|--cpr-stages wb,exposure,ccm,gamma,tone,noise,sharpblur,resample
+# --- block C: the A0 arm, without which "GN helps at A0 but not at A4" cannot be said --------
+c_gn_a0|e1.yaml|--norm gn --photometric none
+c_ibn_a0|e1.yaml|--norm ibn --photometric none
+# --- CPR strength: makes the s7.1 "selection is scored against the pseudo-target" claim true --
+e3_strength05|e3.yaml|--aug-strength 0.5 --select-on pseudo
+e3_strength15|e3.yaml|--aug-strength 1.5 --select-on pseudo
+e3_selpseudo|e3.yaml|--select-on pseudo
+# --- loss ablation now reachable thanks to the generic --set override ------------------------
+e_no_giou|e3.yaml|--set w_giou=0.0
+# --- third seeds on the two configurations every ablation is measured against ----------------
+e1_s3|e1.yaml|--seed 3
+e3_s3|e3.yaml|--seed 3
+a0_none_s1|e1.yaml|--photometric none --seed 1

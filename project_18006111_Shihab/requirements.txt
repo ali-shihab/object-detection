@@ -1,0 +1,21 @@
+# Runtime dependencies for training, evaluation and figures.
+# Pinned to what the results in the report were produced with; see README.md s2.
+#
+# NOTE: torchvision is deliberately ABSENT. The coursework forbids high-level
+# detection/segmentation frameworks, so the model, every box operation (IoU, GIoU, peak
+# suppression) and the whole augmentation pipeline are implemented from scratch in this
+# repository. Nothing here imports torchvision, timm, segmentation_models_pytorch,
+# detectron2, mmdetection, ultralytics, albumentations or kornia.
+
+torch==2.6.0                 # CUDA 12.4 build: --index-url https://download.pytorch.org/whl/cu124
+numpy>=1.26,<3
+Pillow>=10.0
+opencv-python-headless>=4.9
+matplotlib>=3.8
+PyYAML>=6.0
+
+# --- development only -------------------------------------------------------------------
+# scikit-learn>=1.4          # tests/test_utils.py cross-checks our classification metrics
+#                            # against sklearn; not needed to train or evaluate
+# segment-anything           # optional backend for tools/annotate_smartphone.py (annotation
+#                            # tooling only -- not part of the submitted model)

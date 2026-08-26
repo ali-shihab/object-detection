@@ -1,0 +1,22 @@
+# Disjoint half of queue_full.txt. Two GPU hosts share this study; the halves must not
+# overlap, because remote_queue.sh only skips a run whose results already exist and two
+# hosts starting the same row at the same time would both do the work.
+# host: skate-l
+e1|e1.yaml|
+e3|e3.yaml|
+e1_s1|e1.yaml|--seed 1
+b1_no_colour|e3.yaml|--cpr-stages exposure,noise,satihue,sharpblur,resample,jpeg,chroma
+b3_no_sharpblur|e3.yaml|--cpr-stages wb,exposure,ccm,noise,gamma,tone,satihue,resample,jpeg,chroma
+b5_no_jpeg|e3.yaml|--cpr-stages wb,exposure,ccm,noise,gamma,tone,satihue,sharpblur,resample,chroma
+d2_aprs|e1.yaml|--photometric aprs
+e_nomap|e3.yaml|--no-mask-attn-pool
+e_uncertainty|e3.yaml|--loss-weighting uncertainty
+c_ibn|e3.yaml|--norm ibn
+e1_s2|e1.yaml|--seed 2
+b6_no_satihue|e3.yaml|--cpr-stages wb,exposure,ccm,noise,gamma,tone,sharpblur,resample,jpeg,chroma
+a2_linear_isp|e3.yaml|--cpr-stages wb,exposure,ccm,gamma,tone
+c_gn_a0|e1.yaml|--norm gn --photometric none
+e3_strength05|e3.yaml|--aug-strength 0.5 --select-on pseudo
+e3_selpseudo|e3.yaml|--select-on pseudo
+e1_s3|e1.yaml|--seed 3
+a0_none_s1|e1.yaml|--photometric none --seed 1

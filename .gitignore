@@ -1,0 +1,27 @@
+# --- data: the brief forbids shipping the supplied RealSense datasets, and they are GBs ---
+project_18006111_Shihab/results/artifacts/
+project_18006111_Shihab/results/runs/
+project_18006111_Shihab/results/**/*.npz
+project_18006111_Shihab/weights/*.pt
+project_18006111_Shihab/weights/*.pth
+data/
+*.7z
+*.zip
+*.tar
+*.tgz
+
+# raw phone footage is the source material, not the dataset; the 60 annotated frames are
+project_18006111_Shihab/smartphone_dataset/raw_videos/
+project_18006111_Shihab/smartphone_dataset/qc/
+
+# --- build / editor noise ---
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+report/*.aux
+report/*.log
+report/*.out
+report/*.bbl
+report/*.blg
+report/*.synctex.gz

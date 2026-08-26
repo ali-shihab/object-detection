@@ -1,0 +1,45 @@
+# Shared configuration for every run in the study.
+# Experiment files override ONLY what differs, so any parameter absent from e1.yaml / e3.yaml is
+# provably identical between them -- which is what makes the E3-vs-E2 comparison a statement
+# about the augmentation and nothing else.
+index_path: /cs/student/project_msc/2025/rai/ashihab/comp0248_lsa/data/realsense_trainval/index.json
+test_index_path: /cs/student/project_msc/2025/rai/ashihab/comp0248_lsa/data/realsense_test/index.json
+img_size: [384, 288]
+batch_size: 48
+num_workers: 12
+
+geometric: true
+photometric: jitter
+cpr_stages: null
+aug_strength: 1.0
+
+norm: bn
+width: 1.0
+use_mask_attn_pool: true
+heads: [det, seg, cls]
+
+w_heat: 1.0
+w_size: 0.1
+w_off: 1.0
+w_giou: 1.0
+w_bce: 1.0
+w_dice: 1.0
+w_cls: 1.0
+label_smoothing: 0.05
+loss_weighting: fixed
+
+epochs: 60
+lr: 3.0e-4
+weight_decay: 0.05
+warmup_epochs: 3
+min_lr_factor: 0.01
+grad_clip: 1.0
+amp: true
+ema_decay: 0.999
+
+seed: 0
+select_on: val
+select_metric: combined
+eval_every: 1
+save_every: 1
+tag: base

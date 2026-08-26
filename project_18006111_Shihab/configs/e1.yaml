@@ -1,0 +1,12 @@
+# Experiment 1 -- RealSense benchmark (LSA p8).
+# Conventional colour jitter: the augmentation a standard implementation would use, so the
+# baseline is the one a reader expects rather than one chosen to be beatable.
+#
+# Experiment 2 is NOT a separate training run: it is THIS checkpoint, unchanged, evaluated on
+# the smartphone set (same weights, same preprocessing, no fine-tuning -- LSA p8).
+#
+# This file overlays base.yaml and sets ONE substantive field. Everything else is therefore
+# identical to e3.yaml by construction, not by two copies happening to agree.
+extends: base.yaml
+photometric: jitter
+tag: e1
