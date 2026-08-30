@@ -32,6 +32,7 @@ import math
 import os
 import sys
 import time
+import zipfile
 from copy import deepcopy
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -527,7 +528,8 @@ def main(argv: list[str] | None = None) -> int:
             rec["select/score"] = round(score, 5)
             if score > best:
                 best = score
-                _save(out / "best.pt", model, ema, opt, cfg, epoch, best, gstep, n_par)
+                _save(out / "best.pt", model, ema, opt, cfg, epoch, best, gstep, n_par,
+                      with_optimizer=False)
                 rec["select/is_best"] = True
 
         with open(log_path, "a") as f:
@@ -563,13 +565,42 @@ def _selection_score(m: dict, which: str) -> float:
 
 
 def _save(path: Path, model, ema, opt, cfg: Config, epoch: int, best: float,
-          gstep: int, n_par: int) -> None:
+          gstep: int, n_par: int, with_optimizer: bool = True) -> None:
+    """Write a checkpoint atomically.
+
+    ``with_optimizer=False`` for ``best.pt``. The optimizer state is 76 MB of a 153 MB
+    checkpoint (two moment buffers per parameter) and exists only so training can resume --
+    which reads ``last.pt``. Nothing ever resumes from ``best.pt``, and every evaluation reads
+    ``ema``. Writing it there doubled the study's disk footprint and, at 39 runs, exhausted the
+    workspace quota mid-queue. Learned the hard way.
+    """
     tmp = path.with_suffix(".tmp")
-    torch.save({"model": model.state_dict(), "ema": ema.ema.state_dict(),
-                "opt": opt.state_dict(), "cfg": asdict(cfg), "epoch": epoch,
-                "best": best, "gstep": gstep, "n_params": n_par,
-                "torch": torch.__version__}, tmp)
-    os.replace(tmp, path)   # atomic: a host reclaimed mid-write must not leave a torn file
+    payload = {"model": model.state_dict(), "ema": ema.ema.state_dict(),
+               "cfg": asdict(cfg), "epoch": epoch, "best": best, "gstep": gstep,
+               "n_params": n_par, "torch": torch.__version__}
+    if with_optimizer:
+        payload["opt"] = opt.state_dict()
+    torch.save(payload, tmp)
+
+    # os.replace is atomic with respect to a CRASH, and that is all it is atomic with respect
+    # to. On a filesystem that has hit its quota, torch.save can return without raising and
+    # leave a short file, and os.replace will then install that short file over a good
+    # checkpoint. That is not hypothetical: it destroyed one of this study's checkpoints.
+    # A torch checkpoint is a zip archive, and a truncated one fails on exactly one thing --
+    # locating the central directory at the end of the file. Reading the name list is O(1),
+    # needs no tensor loading, and catches precisely that failure, so it is cheap enough to do
+    # on every write.
+    try:
+        with zipfile.ZipFile(tmp) as z:
+            if not z.namelist():
+                raise RuntimeError("empty archive")
+    except Exception as e:
+        os.remove(tmp)
+        raise RuntimeError(
+            f"refusing to install {path.name}: the temp file did not survive the write "
+            f"({type(e).__name__}: {e}). The existing {path.name} is untouched. "
+            f"This almost always means the filesystem is full.") from e
+    os.replace(tmp, path)
 
 
 if __name__ == "__main__":

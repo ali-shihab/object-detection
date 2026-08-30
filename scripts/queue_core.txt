@@ -1,5 +1,0 @@
-# <run-name>|<config>|<extra train args>
-# Priority order: if the GPU is lost, everything above the line still constitutes a
-# complete answer to the mandatory experiments.
-e1|e1.yaml|
-e3|e3.yaml|

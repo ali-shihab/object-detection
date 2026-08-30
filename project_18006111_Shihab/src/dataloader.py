@@ -159,6 +159,11 @@ class HandGestureDataset(Dataset):
             out["meta"] = {
                 "clip_key": f"{rec['subject']}/{rec['gesture']}/{rec['clip']}",
                 "subject": rec["subject"], "frame": int(rec["frame"]),
+                # Carried so evaluate.py can write a per-image prediction row that names the
+                # exact source frame. Costs three strings per item and only when return_meta
+                # is on, which is eval-only -- training never builds this dict.
+                "id": str(rec.get("id", "")), "rgb": str(rec.get("rgb", "")),
+                "gesture": str(rec.get("gesture", "")),
             }
         return out
 

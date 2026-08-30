@@ -26,6 +26,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import sys
@@ -114,7 +115,8 @@ def bootstrap_ci(values_by_clip: dict[str, list[float]], n_boot: int = 1000,
 @torch.no_grad()
 def evaluate_model(model, loader, device, *, amp: bool = True,
                    collect_examples: int = 0, pseudo_target: bool = False,
-                   n_boot: int = 1000, boot_seed: int = 0) -> dict:
+                   n_boot: int = 1000, boot_seed: int = 0,
+                   collect_predictions: bool = False) -> dict:
     """Run the model over ``loader`` and return the full metric block.
 
     ``pseudo_target=True`` applies the held-out phone-style shift of `02_DESIGN.md` s7.1 to
@@ -130,6 +132,9 @@ def evaluate_model(model, loader, device, *, amp: bool = True,
     by_clip: dict[str, dict[str, list[float]]] = {}
     conf_all, correct_all = [], []
     examples: list[dict] = []
+    predictions: list[dict] = []
+    cls_taken: dict[int, int] = {}
+    n_failures = 0
     mean_d, std_d = MEAN.to(device), STD.to(device)
     n_seen = 0
     t0 = time.time()
@@ -197,12 +202,77 @@ def evaluate_model(model, loader, device, *, amp: bool = True,
                 for k, v in seg_i.items():
                     by_clip.setdefault(f"seg_{k}", {}).setdefault(ck, []).append(v)
                 by_clip.setdefault("det_acc@0.5", {}).setdefault(ck, []).append(float(iou >= 0.5))
-            ok = float(int(pred_cls[i].item()) == int(labels[i].item()))
+            gt_i = int(labels[i].item())
+            correct_i = int(pred_cls[i].item()) == gt_i
+            ok = float(correct_i)
             by_clip.setdefault("cls_top1", {}).setdefault(ck, []).append(ok)
             conf_all.append(float(cls_conf[i].item()))
             correct_all.append(ok)
 
-            if len(examples) < collect_examples:
+            if collect_predictions:
+                # One row per input image: the four required outputs (box, mask, class,
+                # confidence) beside the ground truth they are scored against. The aggregate
+                # JSON says how well the model did; this says what it actually predicted, which
+                # is what makes any number in the report checkable frame by frame.
+                gb = gt_box[i].tolist()
+                pb = pred_box[i].tolist()
+                predictions.append({
+                    "id": _meta_field(meta, i, "id", f"_frame{n_seen + i}"),
+                    "rgb": _meta_field(meta, i, "rgb", ""),
+                    "clip": ck,
+                    "subject": _meta_field(meta, i, "subject", ""),
+                    "gesture": _meta_field(meta, i, "gesture", ""),
+                    "frame": _meta_field(meta, i, "frame", n_seen + i),
+                    "gt_class": gt_i,
+                    "gt_class_name": utils.GESTURES[gt_i],
+                    "pred_class": int(pred_cls[i].item()),
+                    "pred_class_name": utils.GESTURES[int(pred_cls[i].item())],
+                    "cls_conf": round(float(cls_conf[i].item()), 6),
+                    "correct": int(correct_i),
+                    "det_conf": round(float(det_conf[i].item()), 6),
+                    "pred_xmin": round(pb[0], 2), "pred_ymin": round(pb[1], 2),
+                    "pred_xmax": round(pb[2], 2), "pred_ymax": round(pb[3], 2),
+                    "pred_mask_area_frac": round(
+                        float((probs[i, 0] >= 0.5).float().mean().item()), 6),
+                    "has_gt_mask": int(hm),
+                    "gt_xmin": round(gb[0], 2) if hm else "",
+                    "gt_ymin": round(gb[1], 2) if hm else "",
+                    "gt_xmax": round(gb[2], 2) if hm else "",
+                    "gt_ymax": round(gb[3], 2) if hm else "",
+                    "box_iou": round(iou, 6) if hm else "",
+                    "seg_iou_hand": round(seg_i["iou_hand"], 6) if hm else "",
+                    "seg_miou": round(seg_i["miou"], 6) if hm else "",
+                    "seg_dice": round(seg_i["dice"], 6) if hm else "",
+                })
+
+            # Example selection is STRATIFIED, not "the first N the loader hands over".
+            # The loader is unshuffled, so taking the first 24 gives 24 consecutive frames of
+            # one clip of one class -- which is what the first version of this figure did, and
+            # it is useless as the brief's "qualitative overlays on a few val/test images".
+            # Cap per class, and always keep room for mistakes: a qualitative figure showing
+            # only successes tells the reader nothing about how the model fails.
+            per_cls_cap = max(1, collect_examples // 10)
+            fail_budget = max(1, collect_examples // 4)
+            take = False
+            if collect_examples:
+                if not correct_i and n_failures < fail_budget:
+                    take = True
+                elif (cls_taken.get(gt_i, 0) < per_cls_cap
+                      and len(examples) < collect_examples):
+                    take = True
+            if take:
+                if len(examples) >= collect_examples:
+                    # replace a correct example so a newly-found failure still gets in
+                    for j, ex in enumerate(examples):
+                        if ex["pred_class"] == ex["gt_class"]:
+                            examples.pop(j)
+                            cls_taken[ex["gt_class"]] = cls_taken.get(ex["gt_class"], 1) - 1
+                            break
+                    else:
+                        take = False
+            if take:
+                cls_taken[gt_i] = cls_taken.get(gt_i, 0) + 1
+                n_failures += 0 if correct_i else 1
                 examples.append({
                     "image": (img[i].detach().cpu() * STD[0] + MEAN[0]).clamp(0, 1).numpy(),
                     "gt_mask": gt_mask[i, 0].detach().cpu().numpy(),
@@ -231,8 +301,36 @@ def evaluate_model(model, loader, device, *, amp: bool = True,
     res["eval_seconds"] = round(time.time() - t0, 2)
     res["pseudo_target"] = bool(pseudo_target)
     if collect_examples:
+        # Deterministic order: by class, then failures first within a class, so the figure reads
+        # left-to-right as a tour of the label set rather than in loader order.
+        examples.sort(key=lambda e: (e["gt_class"], e["pred_class"] == e["gt_class"]))
         res["examples"] = examples
+        res["n_example_failures"] = sum(1 for e in examples
+                                        if e["pred_class"] != e["gt_class"])
+    if collect_predictions:
+        res["predictions"] = predictions
     return res
+
+
+def _meta_field(meta, i: int, key: str, default):
+    """Pull one field out of a collated meta dict, whichever shape the collate produced.
+
+    ``default_collate`` turns a per-item dict of scalars into a dict of batched sequences, but a
+    custom collate (or a single-item batch) can leave it as a list of dicts, and a string field
+    can arrive already collapsed. Handle all three rather than assume one.
+    """
+    if isinstance(meta, dict) and key in meta:
+        v = meta[key]
+        if isinstance(v, (str, int, float)):
+            return v
+        try:
+            v = v[i]
+        except (TypeError, IndexError, KeyError):
+            return default
+        return v.item() if hasattr(v, "item") else v
+    if isinstance(meta, (list, tuple)) and i < len(meta) and isinstance(meta[i], dict):
+        return meta[i].get(key, default)
+    return default
 
 
 def _clip_key(meta, i: int, offset: int) -> str:
@@ -293,7 +391,6 @@ def compare_runs(paths: list[str], out_csv: str | None = None) -> list[dict]:
                 row[f"{k}_hi"] = round(ci[k]["hi"], 4)
         rows.append(row)
     if out_csv:
-        import csv
         cols = sorted({c for r in rows for c in r})
         cols = ["run", "split", "pseudo_target", "n_frames", "n_clips"] + \
                [c for c in cols if c not in ("run", "split", "pseudo_target", "n_frames", "n_clips")]
@@ -317,6 +414,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pseudo-target", action="store_true")
     ap.add_argument("--examples", type=int, default=0)
     ap.add_argument("--examples-out", default=None, help="npz path for the collected examples")
+    ap.add_argument("--predictions-out", default=None,
+                    help="CSV path for one prediction row per input image (box, mask area, "
+                         "class, confidence, and the ground truth it is scored against)")
     ap.add_argument("--n-boot", type=int, default=1000)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
@@ -332,8 +432,10 @@ def main(argv: list[str] | None = None) -> int:
 
     res = evaluate_model(model, loader, device, amp=True,
                          collect_examples=a.examples, pseudo_target=a.pseudo_target,
-                         n_boot=a.n_boot)
+                         n_boot=a.n_boot,
+                         collect_predictions=bool(a.predictions_out))
     examples = res.pop("examples", None)
+    preds = res.pop("predictions", None)
     res["config"] = {
         "ckpt": str(Path(a.ckpt).resolve()), "index": str(Path(a.index).resolve()),
         "split": a.split, "img_size": list(img_size), "batch_size": a.batch_size,
@@ -343,6 +445,14 @@ def main(argv: list[str] | None = None) -> int:
     }
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     utils.save_json(res, a.out)
+
+    if preds and a.predictions_out:
+        Path(a.predictions_out).parent.mkdir(parents=True, exist_ok=True)
+        with open(a.predictions_out, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(preds[0].keys()))
+            w.writeheader()
+            w.writerows(preds)
+        print(f"[eval] wrote {len(preds)} prediction rows to {a.predictions_out}")
 
     if examples is not None and a.examples_out:
         Path(a.examples_out).parent.mkdir(parents=True, exist_ok=True)

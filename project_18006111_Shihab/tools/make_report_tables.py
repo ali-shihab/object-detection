@@ -87,11 +87,12 @@ def table_main(R: dict, out: Path) -> None:
         ("E3 (CPR)", "pseudo-target", "e3_pseudo"),
         ("E3 (CPR)", "smartphone", "e3_phone"),
     ]
-    L = [r"\begin{table*}[t]", r"\centering",
-         r"\caption{Mandatory experiments. All metrics are per-frame; bracketed figures are "
-         r"bootstrap 95\% confidence intervals resampled over clips. E2 is the E1 checkpoint "
-         r"evaluated unchanged on the smartphone set: same weights, same preprocessing, no "
-         r"fine-tuning.}",
+    L = [r"\begin{table*}[!tb]", r"\centering",
+         r"\caption{Mandatory experiments; per-frame metrics, bracketed figures are bootstrap "
+         r"95\% intervals over clips. E2 is the E1 checkpoint evaluated unchanged on the "
+         r"smartphone set --- same weights, same preprocessing, no fine-tuning. Each row is one "
+         r"training run, the checkpoint shipped in \texttt{weights/}, so the intervals are "
+         r"sampling error over clips and not seed-to-seed variability, which is in the text.}",
          r"\label{tab:main}",
          r"\begin{tabular}{ll" + "c" * len(HEADLINE) + "}", r"\toprule",
          "Model & Evaluation set & " + " & ".join(h[1] for h in HEADLINE) + r" \\", r"\midrule"]
@@ -127,21 +128,48 @@ def table_gain(R: dict, out: Path) -> None:
 
 ABL_GROUPS = [
     ("Block B --- CPR leave-one-out (vs.\\ E3)", r"^b[1-9]_", "e3"),
-    ("Block D --- competing randomisers (vs.\\ E1)", r"^d\d_", "e1"),
-    ("Block E --- architecture and loss", r"^e_", "e3"),
+    # E3 is included in this block on purpose: the question Block D exists to answer is
+    # "is the proposed method better than the published alternatives?", and that is unreadable
+    # if the proposal's own delta sits in a different table three blocks away.
+    ("Block D --- competing randomisers, and CPR among them (vs.\\ E1)", r"^(d\d_|e3$)", "e1"),
+    ("Block E --- architecture and loss (vs.\\ E3)", r"^e_", "e3"),
     ("Block C --- normalisation (vs.\\ E3)", r"^c_", "e3"),
     ("Block A --- augmentation floor (vs.\\ E1)", r"^a\d_", "e1"),
-    ("Seed repeats", r"_s\d$", None),
+    # The per-seed repeats (`*_s1`, `*_s2`, ...) are deliberately NOT a block here. Nine rows of
+    # duplicates cost about a tenth of a page in a report capped at 6 pages including references,
+    # and the text reports the mean and standard deviation over seeds, which is what the reader
+    # needs. Every per-seed JSON still ships in results/, so no evidence is lost.
 ]
+
+
+# Metrics a head-subset run cannot produce. `e_singletask_cls` is built with heads=("cls",), and
+# evaluate.py fills its absent detection and segmentation outputs with zeros rather than nulls --
+# so a delta against a full model reads as "-0.945 detection accuracy" for a model that has no
+# detection head at all. Suppress those cells instead of printing a number that means nothing.
+HEAD_SUBSET = {
+    "det": ("det_acc@0.5", "det_acc@0.75", "mean_box_iou"),
+    "seg": ("seg_iou_hand", "seg_miou", "seg_dice"),
+}
+
+
+def _absent_metrics(d: dict) -> set:
+    heads = (d.get("config", {}).get("train_cfg", {}) or {}).get("heads")
+    if not heads:
+        return set()
+    return {m for h, ms in HEAD_SUBSET.items() if h not in heads for m in ms}
 
 
 def table_ablation(R: dict, out: Path, split: str = "rs_test") -> None:
     """The ablation grid. Deltas, because absolute numbers hide small effects."""
-    L = [r"\begin{table*}[t]", r"\centering",
-         rf"\caption{{Ablations, evaluated on the RealSense test set. Values are deltas against "
-         rf"the reference run named in each block heading; bracketed figures are the reference's "
-         rf"seed spread where two seeds were run. A delta smaller than the seed spread is not a "
-         rf"result.}}",
+    # \footnotesize and a tighter column separation are page-budget decisions, not cosmetics: the
+    # report is capped at 6 pages including references (LSA p13) and this is the largest float in
+    # it. [!tb] rather than [t] lets it take the bottom of a page too, which stfloats enables.
+    L = [r"\begin{table*}[!tb]", r"\centering",
+         r"\footnotesize\setlength{\tabcolsep}{4.5pt}",
+         rf"\caption{{Ablations on the RealSense test set, as deltas against the reference named "
+         rf"in each block heading (its seed-0 checkpoint). A delta smaller than the seed spread "
+         rf"quoted in the text is not a result; a dash marks a metric a configuration cannot "
+         rf"produce. Per-seed repeats are summarised in the text.}}",
          r"\label{tab:ablation}",
          r"\begin{tabular}{l" + "c" * len(HEADLINE) + "}", r"\toprule",
          "Run & " + " & ".join(h[1] for h in HEADLINE) + r" \\"]
@@ -156,8 +184,9 @@ def table_ablation(R: dict, out: Path, split: str = "rs_test") -> None:
             d = R[k]
             name = k.replace("_" + split, "")
             cells = []
+            absent = _absent_metrics(d)
             for mk, _, nd in HEADLINE:
-                v = val(d, mk)
+                v = None if mk in absent else val(d, mk)
                 if v is None:
                     cells.append("--")
                 elif base is not None and val(base, mk) is not None:
@@ -177,8 +206,11 @@ def table_perclass(R: dict, out: Path) -> None:
         return
     names = R[present[0][1]].get("class_names", utils.GESTURES)
     L = [r"\begin{table}[t]", r"\centering",
-         r"\caption{Per-class $F_1$. The classes that survive the cross-camera shift, and the "
-         r"ones that do not, are more informative than the macro average alone.}",
+         r"\caption{Per-class $F_1$" + ("" if len(present) > 1 else
+           " on the RealSense test set. The smartphone columns appear here once that set exists; "
+           "until then this is the in-domain per-class breakdown only") +
+         (". The classes that survive the cross-camera shift, and the ones that do not, are more "
+          "informative than the macro average alone." if len(present) > 1 else ".") + r"}",
          r"\label{tab:perclass}",
          r"\begin{tabular}{l" + "c" * len(present) + "}", r"\toprule",
          "Gesture & " + " & ".join(esc(l) for l, _ in present) + r" \\", r"\midrule"]

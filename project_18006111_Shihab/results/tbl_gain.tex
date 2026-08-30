@@ -1,0 +1,17 @@
+\begin{table}[t]
+\centering
+\caption{Experiment 3 relative to Experiment 2 on the smartphone test set. Both models are trained on RealSense data only; they differ solely in the photometric augmentation.}
+\label{tab:gain}
+\begin{tabular}{lccc}
+\toprule
+Metric & E2 (zero-shot) & E3 (+CPR) & $\Delta$ \\
+\midrule
+Det.\ acc@0.5 & 1.000 & 1.000 & +0.000\,$\downarrow$ \\
+Mean box IoU & 0.846 & 0.837 & -0.009\,$\downarrow$ \\
+Hand IoU & 0.872 & 0.869 & -0.003\,$\downarrow$ \\
+Dice & 0.930 & 0.929 & -0.002\,$\downarrow$ \\
+Top-1 & 0.700 & 0.683 & -0.017\,$\downarrow$ \\
+Macro-F1 & 0.614 & 0.611 & -0.004\,$\downarrow$ \\
+\bottomrule
+\end{tabular}
+\end{table}

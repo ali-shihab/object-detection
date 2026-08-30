@@ -1,27 +1,47 @@
-# --- data: the brief forbids shipping the supplied RealSense datasets, and they are GBs ---
+# This repository contains ONLY what the coursework brief asks for: the deliverable folder
+# project_18006111_Shihab/ (src, tools, configs, tests, smartphone_dataset, results) and a README.
+# Working material that is not a deliverable is kept out.
+
+# --- not deliverables ---
+docs/
+scripts/
+report/
+_scratch/
+annotations.json
+
+# --- supplied datasets: the brief forbids redistributing them, and they are GBs ---
+data/
 project_18006111_Shihab/results/artifacts/
 project_18006111_Shihab/results/runs/
+project_18006111_Shihab/results/results/
 project_18006111_Shihab/results/**/*.npz
-project_18006111_Shihab/weights/*.pt
-project_18006111_Shihab/weights/*.pth
-data/
 *.7z
-*.zip
 *.tar
 *.tgz
 
-# raw phone footage is the source material, not the dataset; the 60 annotated frames are
+# --- trained weights: shipped in the submission zip, not in git (2 x 40 MB binaries) ---
+project_18006111_Shihab/weights/*.pt
+project_18006111_Shihab/weights/*.pth
+
+# --- raw phone footage is source material; the 60 annotated frames are the dataset ---
 project_18006111_Shihab/smartphone_dataset/raw_videos/
 project_18006111_Shihab/smartphone_dataset/qc/
 
-# --- build / editor noise ---
+# --- build artefacts and archives ---
+*.zip
+Project_*.zip
 __pycache__/
 *.pyc
 .DS_Store
 .venv/
-report/*.aux
-report/*.log
-report/*.out
-report/*.bbl
-report/*.blg
-report/*.synctex.gz
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# stray archive left by make_submission.sh (no extension, so not caught by *.zip)
+ziiYeDKA

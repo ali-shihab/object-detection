@@ -108,8 +108,14 @@ def test_sample_shapes_dtypes_and_ranges() -> None:
         assert torch.isfinite(s["image"]).all()
         # normalised, not raw: ImageNet stats put a [0,255] image roughly in [-2.2, 2.7]
         assert -2.3 < float(s["image"].min()) and float(s["image"].max()) < 2.8
-        assert set(s["meta"]) == {"clip_key", "subject", "frame"}
+        # The meta contract is pinned exactly, not loosely: evaluate.py writes one prediction
+        # row per image keyed on these fields, so a silently renamed or dropped key would turn
+        # every row's identity into a fallback index without anything failing.
+        assert set(s["meta"]) == {"clip_key", "subject", "frame", "id", "rgb", "gesture"}
         assert s["meta"]["clip_key"].count("/") == 2
+        assert isinstance(s["meta"]["id"], str) and s["meta"]["id"]
+        assert s["meta"]["rgb"].endswith((".jpg", ".jpeg", ".png"))
+        assert s["meta"]["gesture"] in s["meta"]["clip_key"]
 
 
 def test_normalisation_is_exactly_the_contract() -> None:

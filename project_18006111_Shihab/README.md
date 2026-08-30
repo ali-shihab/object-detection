@@ -6,9 +6,9 @@ D455 frames and evaluated unchanged on smartphone photographs.
 
 Student number `18006111` (Shihab).
 
-**Code repository:** `https://github.com/<your-github-username>/comp0248-cw1-lsa`
-<!-- The brief requires a GitHub link in the report (LSA p12). Create the repository, push this
-     directory, and put the resulting URL both here and in the report's introduction. -->
+**Code repository:** https://github.com/ali-shihab/object-detection
+The repository is public; the same link appears on page 1 of the report, as the brief requires
+(LSA p12).
 
 ---
 
@@ -17,9 +17,9 @@ Student number `18006111` (Shihab).
 ```
 project_18006111_Shihab/
 ├── smartphone_dataset/
-│   ├── 18006111_Shihab/          # the collected smartphone test set (60 frames)
-│   │   └── G01_call/clip01/{rgb,annotation}/frame_001.png ...
-│   ├── raw_videos/               # the 20 source clips
+│   ├── 18006111_Shihab/          # the 60-frame smartphone test set (10 gestures x 2 clips x 3)
+│   │   └── G01_call/clip02/{rgb,annotation}/frame_001.png ...
+│   ├── raw_videos/               # source clips -- EXCLUDED from the submitted zip (size)
 │   └── RECORDING_GUIDE.md        # the capture protocol these clips were shot to
 ├── src/
 │   ├── utils.py                  # box ops, metrics, MetricAccumulator, seeding, IO
@@ -31,12 +31,13 @@ project_18006111_Shihab/
 │   └── visualise.py              # every figure in the report
 ├── tools/
 │   ├── pack_dataset.py           # raw release -> packed training format
-│   ├── annotate_smartphone.py    # clips -> frames, masks, mask-derived boxes, QC sheets
+│   ├── annotate_smartphone.py    # clips -> frames, mask-derived boxes, QC sheets
+│   ├── annotate_smartphone_sam.py # SAM pre-annotation of the smartphone masks (see s8)
 │   ├── baseline_classical.py     # the non-deep baseline (skin + HOG + softmax regression)
 │   └── make_report_tables.py     # result JSONs -> the report's LaTeX tables
 ├── configs/                      # base.yaml + one file per mandatory experiment
 ├── tests/                        # four suites, plain asserts, no pytest needed
-├── weights/                      # checkpoints (best.pt / last.pt per run)
+├── weights/                      # e1_best.pt, e3_best.pt (EMA weights only; see s8)
 ├── results/                      # metric JSONs, comparison CSVs, figures
 ├── requirements.txt
 └── README.md
@@ -56,7 +57,8 @@ pip install -r requirements.txt
 ```
 
 Results in the report were produced with Python 3.11.14, torch 2.6.0+cu124, on one NVIDIA
-RTX 4070 Ti SUPER (16 GB, sm_89) under Rocky Linux 9.8 — a UCL CS Knuckles GPU host. The code
+RTX 4070 Ti SUPER (16 GB, sm_89) under Rocky Linux 9.8 — one of two UCL CS Knuckles GPU hosts the
+queue was split across. The code
 runs on CPU unchanged (pass `--device cpu`), just slowly.
 
 ## 3. Data preparation
@@ -73,10 +75,20 @@ python tools/pack_dataset.py --src rgb_only.7z --out data/realsense_trainval \
 python tools/pack_dataset.py --src "Test data-COMP0248_Test_data_23" \
     --out data/realsense_test --packed-size 512 384 --test --subject-name test23
 
-# smartphone test set (already packed in this submission; this is how it was made)
+# smartphone test set (already packed in this submission; this is how it was made).
+# Follows the Week-4 tutorial: SAM pre-annotation -> Label Studio refinement -> decode.
+# Step 1 -- frame extraction from the recordings:
 python tools/annotate_smartphone.py --videos smartphone_dataset/raw_videos \
-    --out smartphone_dataset/18006111_Shihab --backend grabcut
-python tools/pack_dataset.py --src smartphone_dataset --out data/phone_test --test
+    --out smartphone_dataset/18006111_Shihab
+# Step 2 -- SAM pre-annotation (annotation tooling only; see s8):
+python tools/annotate_smartphone_sam.py --src smartphone_dataset/18006111_Shihab \
+    --out _scratch/ls_work --sam-checkpoint sam_vit_b_01ec64.pth
+# Step 3 -- refine every mask by hand in Label Studio, then decode the JSON-MIN export.
+#   The tutorial's convert_annotations_for_LS.py / process_LS_output.py do the two conversions.
+#   label-studio and label-studio-converter cannot coexist in one environment: install
+#   label-studio==1.13.1 in its own venv and run the converter elsewhere.
+python tools/pack_dataset.py --src smartphone_dataset/18006111_Shihab \
+    --out data/phone_test --packed-size 512 384 --test --subject-name 18006111_Shihab
 ```
 
 Packing writes `rgb/*.jpg`, `ann/*.png` and one `index.json` holding the record list, the
@@ -119,12 +131,13 @@ reclaimed at any time. `--dry-run N` runs N steps plus one evaluation, as a smok
 
 ```bash
 python -m src.evaluate --ckpt runs/e1/best.pt --index data/realsense_test/index.json \
-    --split test --out results/e1_realsense_test.json --examples 24 \
+    --split test --out results/e1_rs_test.json --examples 24 \
     --examples-out results/e1_examples.npz
 
-# Experiment 2: the SAME checkpoint, unchanged, on the smartphone set
+# Experiment 2: the SAME checkpoint, unchanged, on the smartphone set.
+# NOTE the filename: E2 is the E1 checkpoint, so its result file is e1_phone.json.
 python -m src.evaluate --ckpt runs/e1/best.pt --index data/phone_test/index.json \
-    --split test --out results/e2_phone.json
+    --split test --out results/e1_phone.json
 
 # Experiment 3 on the same smartphone set
 python -m src.evaluate --ckpt runs/e3/best.pt --index data/phone_test/index.json \
@@ -162,10 +175,18 @@ The submitted model is written from scratch with `torch.nn` primitives. There is
 Detectron2, MMDetection or Ultralytics anywhere in `src/` or `tools/`, and no pretrained weights
 are loaded — the network is trained from random initialisation. Box IoU, GIoU, peak suppression,
 Gaussian target rendering and every augmentation operation are implemented in this repository.
-One qualification, stated rather than buried: `tools/annotate_smartphone.py` offers an optional
-`--backend sam` that loads a pretrained Segment Anything checkpoint. That is **annotation
-tooling** for building the smartphone test set's ground truth — it plays no part in the model,
-its training, or any reported prediction, and the default backend (`grabcut`) uses no pretrained
-weights at all. The brief points students at the week-4 annotation guide for this step and does
-not restrict it; the restrictions it does impose are on the *submitted model*, which loads no
-pretrained weights of any kind.
+One qualification, stated rather than buried. The smartphone ground-truth masks were built with
+`tools/annotate_smartphone_sam.py`, which loads a pretrained **Segment Anything** checkpoint and
+uses **MediaPipe**'s hand landmarker to place SAM's prompt. Both are **annotation tooling**: they
+run once, offline, to produce ground truth. Neither is imported by `src/`, runs at training or
+inference time, or contributes to any reported prediction — the restrictions the brief imposes are
+on the *submitted model*, which loads no pretrained weights of any kind.
+
+This is the pipeline the course prescribes. The Week-4 tutorial
+(`Realsense_datacollection_n_annotation.pdf`, Part 3) instructs students to pre-annotate with SAM3
+in Colab and refine in Label Studio, and the RealSense masks this project trains and evaluates
+against were produced that way. Two substitutions are recorded: SAM 1 stands in for SAM3, whose
+weights are gated behind a manual approval form; and because SAM 1 is promptable by points and
+boxes rather than text, MediaPipe supplies the prompt SAM3 would have taken from the word "hand".
+MediaPipe contributes no pixels to any mask. Every one of the 60 masks was then reviewed by hand in
+Label Studio and 42 were corrected.

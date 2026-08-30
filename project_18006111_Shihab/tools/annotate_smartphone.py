@@ -52,6 +52,14 @@ GESTURES = ["G01_call", "G02_dislike", "G03_like", "G04_ok", "G05_one",
             "G06_palm", "G07_peace", "G08_rock", "G09_stop", "G10_three"]
 GESTURE_SET = set(GESTURES)
 NAME_RE = re.compile(r"^(G\d{2}_[A-Za-z]+)_?(clip\d{2})\.(mp4|mov|m4v|avi)$", re.IGNORECASE)
+# The as-recorded scheme: G<scene>_<gesture>.MOV, e.g. G02_call.MOV is the "call" sign shot
+# against background 2. The scene number becomes the clip number, so each gesture ends up with
+# one clip per background it was recorded against.
+SCENE_RE = re.compile(r"^G(\d{1,2})_([A-Za-z]+)\.(mp4|mov|m4v|avi)$", re.IGNORECASE)
+GESTURE_BY_WORD = {g.split("_", 1)[1].lower(): g for g in GESTURES}
+EMIT_SIZE = (640, 480)      # the RealSense release's resolution; keeps the two sets comparable
+HOLD_WINDOW = (0.20, 0.80)  # sample only the middle of a clip -- see the module docstring
+STRIDE = 3                  # 30 fps / 3 = a candidate every 0.1 s, ample for picking a sharp one
 
 # Reference bands from the RealSense release (01_DATA.md s2), used only to FLAG proposals.
 REF = {"area_lo": 0.010, "area_hi": 0.075, "aspect_lo": 0.35, "aspect_hi": 1.60,
@@ -68,39 +76,58 @@ def sharpness(img: np.ndarray) -> float:
 
 
 def sample_frames(path: Path, n: int = 3, min_gap_s: float = 1.0) -> list[tuple[int, np.ndarray]]:
-    """Pick ``n`` frames at least ``min_gap_s`` apart, each the sharpest in its window.
+    """Pick ``n`` frames, each the sharpest in its window, streaming rather than buffering.
 
-    The clip is split into ``n`` equal windows and the sharpest frame of each is taken. That
-    guarantees the spacing rule by construction (windows of a >=3 s clip are >=1 s wide) while
-    still avoiding blur, which a fixed-stride sampler would walk straight into.
+    The held portion of the clip (HOLD_WINDOW) is split into ``n`` equal windows and the sharpest
+    frame of each is kept. Splitting by window guarantees the spacing rule by construction while
+    avoiding blur, which a fixed-stride sampler walks straight into.
+
+    Only the running best frame per window is held, because these clips are 4K: buffering one
+    decoded 3840x2160 clip costs about 4 GB for three frames of output.
     """
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise RuntimeError(f"cannot open {path}")
+    # iPhone clips carry a display-matrix rotation (these are tagged 180 degrees). OpenCV applies
+    # it when ORIENTATION_AUTO is on, and every frame is upside down when it is not -- so set it
+    # explicitly and verify below rather than depending on the build's default.
+    if hasattr(cv2, "CAP_PROP_ORIENTATION_AUTO"):
+        cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    frames = []
-    idx = 0
-    while True:
+    if total <= 0:
+        raise RuntimeError(f"cannot determine frame count for {path}")
+    lo, hi = int(total * HOLD_WINDOW[0]), int(total * HOLD_WINDOW[1])
+    span = max(1, hi - lo)
+    if span / fps < min_gap_s * (n - 1):
+        print(f"[warn] {path.name}: the held portion is {span / fps:.2f}s, shorter than the "
+              f"{min_gap_s * (n - 1):.0f}s the {n}-frame spacing rule needs", file=sys.stderr)
+
+    bounds = np.linspace(lo, hi, n + 1).astype(int)
+    best: list[tuple[float, int, np.ndarray] | None] = [None] * n
+    # Seek to the held window rather than decoding up to it. H.264 seeking lands on the nearest
+    # keyframe, so the true position is read back rather than assumed.
+    cap.set(cv2.CAP_PROP_POS_FRAMES, lo)
+    idx = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or lo)
+    seen = 0
+    while idx < hi:
         ok, f = cap.read()
         if not ok:
             break
-        frames.append((idx, f))
+        if idx >= lo and (idx - lo) % STRIDE == 0:
+            w = int(np.searchsorted(bounds, idx, side="right")) - 1
+            if 0 <= w < n:
+                seen += 1
+                sc = sharpness(f)
+                if best[w] is None or sc > best[w][0]:
+                    best[w] = (sc, idx, f)
         idx += 1
     cap.release()
-    if not frames:
+    if seen == 0:
         raise RuntimeError(f"no frames decoded from {path}")
-    total = len(frames)
-    if total / fps < min_gap_s * (n - 1):
-        print(f"[warn] {path.name}: {total / fps:.2f}s is shorter than the {min_gap_s * (n - 1):.0f}s "
-              f"the {n}-frame spacing rule needs", file=sys.stderr)
-
-    picks = []
-    bounds = np.linspace(0, total, n + 1).astype(int)
-    for a, b in zip(bounds[:-1], bounds[1:]):
-        window = frames[a:max(a + 1, b)]
-        best = max(window, key=lambda t: sharpness(t[1]))
-        picks.append(best)
+    picks = [(b[1], b[2]) for b in best if b is not None]
+    if len(picks) < n:
+        raise RuntimeError(f"{path.name}: only {len(picks)} of {n} windows yielded a frame")
     return picks
 
 
@@ -224,6 +251,251 @@ def propose_grabcut(bgr: np.ndarray, point: tuple[int, int] | None = None,
 
 
 _SAM = {}
+
+
+
+def background_plate(path, crop_fn=None, emit_size=None, n: int = 12) -> "np.ndarray | None":
+    """Per-pixel median of frames from the head and tail of a clip: the empty scene.
+
+    The hand is raised into shot and dropped out again, so the first and last tenth of a clip are
+    background. A median over both ends is robust to a few frames that do contain the hand, which
+    a mean would not be.
+    """
+    cap = cv2.VideoCapture(str(path))
+    if hasattr(cv2, "CAP_PROP_ORIENTATION_AUTO"):
+        cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if total <= 0:
+        cap.release(); return None
+    head = list(range(0, max(1, int(total * 0.10)), max(1, int(total * 0.10) // (n // 2) or 1)))
+    tail = list(range(int(total * 0.90), total, max(1, (total - int(total * 0.90)) // (n // 2) or 1)))
+    grabbed = []
+    for i in head + tail:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+        ok, f = cap.read()
+        if not ok:
+            continue
+        if crop_fn is not None:
+            f = crop_fn(f)
+        if emit_size and (f.shape[1], f.shape[0]) != emit_size:
+            f = cv2.resize(f, emit_size, interpolation=cv2.INTER_AREA)
+        grabbed.append(f)
+    cap.release()
+    if len(grabbed) < 3:
+        return None
+    return np.median(np.stack(grabbed), axis=0).astype(np.uint8)
+
+
+def scene_plate(videos, crop_fn=None, emit_size=None, per_clip: int = 3,
+                cache: "Path | None" = None) -> "np.ndarray | None":
+    """Median across frames from every clip of one scene: the room without the hand.
+
+    Ten gestures share each background and the hand is somewhere different in each, so a pixel is
+    covered by the hand in a minority of clips and the median returns the background. This is
+    strictly better than a per-clip plate, which fails whenever the hand is in shot for the whole
+    clip.
+    """
+    if cache is not None and cache.exists():
+        img = cv2.imread(str(cache))
+        if img is not None:
+            return img
+    grabbed = []
+    for v in videos:
+        cap = cv2.VideoCapture(str(v))
+        if hasattr(cv2, "CAP_PROP_ORIENTATION_AUTO"):
+            cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total <= 0:
+            cap.release(); continue
+        for frac in np.linspace(0.25, 0.75, per_clip):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(total * frac))
+            ok, f = cap.read()
+            if not ok:
+                continue
+            if crop_fn is not None:
+                f = crop_fn(f)
+            if emit_size and (f.shape[1], f.shape[0]) != emit_size:
+                f = cv2.resize(f, emit_size, interpolation=cv2.INTER_AREA)
+            grabbed.append(f)
+        cap.release()
+    if len(grabbed) < 5:
+        return None
+    plate = np.median(np.stack(grabbed), axis=0).astype(np.uint8)
+    if cache is not None:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(cache), plate)
+    return plate
+
+
+def propose_bgsub(bgr: np.ndarray, plate: np.ndarray,
+                  point: "tuple[int, int] | None" = None) -> np.ndarray:
+    """Try increasingly permissive difference levels; keep the first plausible hand.
+
+    REF's area band comes from the RealSense release, so "plausible" means "the size a hand is in
+    the data this set is compared against". The first level that lands in the band wins; if none
+    does, the largest attempt is returned, because under-segmentation loses fingers whereas
+    over-segmentation is visible on the QC sheet and correctable.
+    """
+    def miss(f):                       # distance outside the band; 0 when inside it
+        return max(0.0, REF["area_lo"] - f) + max(0.0, f - REF["area_hi"])
+
+    best, best_miss, best_frac = None, float("inf"), 0.0
+    # Shadow-robust first (chroma-weighted), then lightness-sensitive. A dark hand on a light wall
+    # is a lightness difference and nothing else; a cast shadow is a lightness difference too,
+    # which is why neither weighting can serve alone.
+    ladder = [(sc, 0.25) for sc in (0.5, 0.35, 0.25, 0.15)] + \
+             [(sc, 1.0) for sc in (0.5, 0.35, 0.25)]
+    for scale, lw in ladder:
+        out = _bgsub_at(bgr, plate, point, scale, lw)
+        frac = float((out >= MASK_THRESH).mean())
+        if REF["area_lo"] <= frac <= REF["area_hi"]:
+            return out
+        # Keep the attempt closest to the band, not the largest. Returning the largest is right
+        # for an under-segmented hand and precisely wrong for an over-segmented forearm.
+        if miss(frac) < best_miss:
+            best, best_miss, best_frac = out, miss(frac), frac
+
+    if best is not None and best_frac < REF["area_lo"] and best.max() > 0:
+        # Still too small at every level: the difference has found the hand's position but not its
+        # extent. Rectangle-initialised GrabCut over a generous neighbourhood of that position
+        # recovers the shape from the image itself.
+        ys, xs = np.nonzero(best >= MASK_THRESH)
+        h, w = best.shape
+        pad = int(0.6 * max(ys.ptp() + 1, xs.ptp() + 1)) + 8
+        x1, y1 = max(0, xs.min() - pad), max(0, ys.min() - pad)
+        x2, y2 = min(w - 1, xs.max() + pad), min(h - 1, ys.max() + pad)
+        if x2 - x1 > 10 and y2 - y1 > 10:
+            rect = _rect_grabcut(bgr, (x1, y1, x2 - x1, y2 - y1))
+            rf = float((rect >= MASK_THRESH).mean())
+            if miss(rf) < best_miss:
+                return rect
+    return best
+
+
+def _bgsub_at(bgr: np.ndarray, plate: np.ndarray,
+              point: "tuple[int, int] | None", wide_scale: float,
+              l_weight: float = 0.25) -> np.ndarray:
+    """Hand mask as "what differs from the empty scene", refined by GrabCut.
+
+    The difference is taken in CIE Lab so that a change in illumination alone -- the hand casting
+    a shadow on the wall -- moves L without moving a and b, and a chroma-weighted distance keeps
+    the shadow out of the mask while keeping the hand in it.
+    """
+    lab_f = cv2.cvtColor(cv2.GaussianBlur(bgr, (5, 5), 0), cv2.COLOR_BGR2LAB).astype(np.int16)
+    lab_p = cv2.cvtColor(cv2.GaussianBlur(plate, (5, 5), 0), cv2.COLOR_BGR2LAB).astype(np.int16)
+    # float32, not int16. A Lab difference reaches 255, and 255^2 = 65025 overflows int16 to a
+    # NEGATIVE value, so the sqrt below returns NaN and the cast turns it into noise. The effect
+    # is that the LARGEST differences -- a dark hand against a bright wall, exactly the case that
+    # was failing -- were the ones silently discarded. numpy raised "invalid value encountered in
+    # sqrt" about this from the first run; it was a warning on stderr among thousands of lines,
+    # and it was the whole problem.
+    d = (lab_f - lab_p).astype(np.float32)
+    # Chroma weighted 2x against lightness: a cast shadow is a big L change and a small ab change.
+    dist = np.sqrt(l_weight * d[..., 0] ** 2 + d[..., 1] ** 2 + d[..., 2] ** 2)
+    dist = np.clip(dist, 0, 255).astype(np.uint8)
+    t_otsu, core_raw = cv2.threshold(dist, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # A second, more permissive level. Otsu picks the split that best separates two populations;
+    # when the hand and the wall are nearly the same colour that split lands inside the hand and
+    # returns a sliver. Half the Otsu level is the candidate region GrabCut is allowed to claim.
+    _, wide_raw = cv2.threshold(dist, max(4.0, t_otsu * wide_scale), 255, cv2.THRESH_BINARY)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    clean = lambda m: largest_component(
+        cv2.morphologyEx(cv2.morphologyEx(m, cv2.MORPH_OPEN, k, 1), cv2.MORPH_CLOSE, k, 2))
+    core_raw, wide_raw = clean(core_raw), clean(wide_raw)
+    seed = wide_raw if wide_raw.max() > 0 else core_raw
+    if seed.max() == 0:
+        return propose_grabcut(bgr, point)
+
+    gc = np.full(bgr.shape[:2], cv2.GC_BGD, np.uint8)
+    near = cv2.dilate(seed, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (35, 35)))
+    core = cv2.erode(core_raw, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    gc[near > 0] = cv2.GC_PR_BGD
+    gc[seed > 0] = cv2.GC_PR_FGD
+    gc[core > 0] = cv2.GC_FGD
+    if (gc == cv2.GC_FGD).sum() < 50 or (gc == cv2.GC_BGD).sum() < 50:
+        return seed
+    try:
+        bgd, fgd = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)
+        cv2.grabCut(bgr, gc, None, bgd, fgd, 3, cv2.GC_INIT_WITH_MASK)
+    except cv2.error:
+        return seed
+    out = np.where((gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+    out = largest_component(cv2.morphologyEx(out, cv2.MORPH_CLOSE, k, iterations=2))
+    # Absolute sanity, not a multiple of the seed: a seed that is itself a sliver makes "3x the
+    # seed" a meaningless ceiling. A hand is never a quarter of the frame.
+    frac = (out >= 128).mean()
+    if out.sum() == 0 or frac > 0.25:
+        return seed
+    return out
+
+
+
+def cut_at_wrist(mask: np.ndarray, k: float = 1.7) -> np.ndarray:
+    """Drop the forearm from a hand-and-arm silhouette entering from a frame edge.
+
+    ``k`` is the cut distance in palm radii below the palm centre. It is deliberately generous:
+    keeping a little forearm is a smaller error than amputating fingers, and the QC sheet is
+    where the remaining judgement happens.
+    """
+    m = (mask >= 128).astype(np.uint8)
+    if m.sum() == 0:
+        return mask
+    h, w = m.shape
+    touches = {"bottom": m[-1].any(), "top": m[0].any(),
+               "left": m[:, 0].any(), "right": m[:, -1].any()}
+    if not any(touches.values()):
+        return mask                      # already hand-only; nothing to do
+
+    dt = cv2.distanceTransform(m, cv2.DIST_L2, 5)
+    if float(dt.max()) < 3:
+        return mask
+
+    # Locate the entry point first, then look for the palm in the far half of the blob. A sleeved
+    # forearm held horizontally inscribes a larger circle than the hand, so a global argmax puts
+    # the "palm" inside the sleeve and the cut then removes the hand instead of the arm.
+    edge0 = np.zeros_like(m)
+    edge0[0, :] = m[0, :]; edge0[-1, :] = m[-1, :]
+    edge0[:, 0] = m[:, 0]; edge0[:, -1] = m[:, -1]
+    eys, exs = np.nonzero(edge0)
+    if len(eys) == 0:
+        return mask
+    ey, ex = float(eys.mean()), float(exs.mean())
+    gy0, gx0 = np.mgrid[0:h, 0:w]
+    from_entry = np.hypot(gy0 - ey, gx0 - ex) * m
+    far = from_entry > (0.5 * from_entry.max())
+    search = np.where(far, dt, 0.0)
+    if search.max() < 3:
+        search = dt
+    r = float(search.max())
+    cy, cx = np.unravel_index(int(np.argmax(search)), search.shape)
+
+    # The arm's direction, from the palm outwards. Taken as palm centre -> centroid of the mask
+    # pixels actually lying on a frame border, so an arm entering diagonally or from the side is
+    # handled the same as one rising from the bottom. An axis-aligned cut could not do that, and
+    # left the sleeve in the mask for every horizontally-held gesture.
+    edge = np.zeros_like(m)
+    edge[0, :] = m[0, :]; edge[-1, :] = m[-1, :]
+    edge[:, 0] = m[:, 0]; edge[:, -1] = m[:, -1]
+    ys, xs = np.nonzero(edge)
+    if len(ys) == 0:
+        return mask
+    vy, vx = float(ys.mean() - cy), float(xs.mean() - cx)
+    n = float(np.hypot(vy, vx))
+    if n < 1e-3:
+        return mask
+    vy, vx = vy / n, vx / n
+
+    # Keep everything on the palm side of a line perpendicular to that direction, placed k palm
+    # radii along it.
+    gy, gx = np.mgrid[0:h, 0:w]
+    proj = (gy - cy) * vy + (gx - cx) * vx
+    cut = (proj <= k * r).astype(np.uint8)
+    out = largest_component((m * cut * 255).astype(np.uint8))
+    # Conservative: if the cut removed most of the blob, or left nothing, the heuristic did not
+    # apply to this shape and the uncut mask is the safer artefact to send to QC.
+    if out.sum() == 0 or out.sum() < 0.30 * m.sum() * 255:
+        return mask
+    return out
 
 
 def propose_sam(bgr: np.ndarray, ckpt: str, point: tuple[int, int] | None = None) -> np.ndarray:
@@ -364,14 +636,72 @@ def contact_sheet(items: list[dict], out_path: Path, cols: int = 6, tile: int = 
 # ======================================================================================
 # main
 # ======================================================================================
+def rebuild_index(out_root: Path, qc_dir: Path, cols: int = 10) -> int:
+    """Regenerate boxes.json, annotation_index.json and the contact sheet from the written set."""
+    items, index, n_flagged = [], [], 0
+    frames = sorted(out_root.glob("G*/clip*/rgb/frame_*.png"))
+    for f in frames:
+        m = f.parent.parent / "annotation" / f.name
+        if not m.exists():
+            print(f"[error] no mask for {f}", file=sys.stderr)
+            continue
+        img = cv2.imread(str(f))
+        mask = cv2.imread(str(m), cv2.IMREAD_GRAYSCALE)
+        gesture, clip = f.parts[-4], f.parts[-3]
+        j = int(f.stem.split("_")[1])
+        key = f"{gesture}/{clip}/{j:03d}"
+        flags = qc_flags(mask)
+        n_flagged += bool(flags)
+        index.append({"id": key, "gesture": gesture, "clip": clip, "frame": j,
+                      "box": mask_to_box(mask), "flags": flags,
+                      "mask_area_frac": round(float((mask >= MASK_THRESH).mean()), 6)})
+        items.append({"id": key, "flags": flags, "overlay": overlay(img, mask)})
+
+    boxes = {"convention": "(x1,y1,x2,y2) absolute pixels, tight box of the mask thresholded at "
+                          "128; x2/y2 are one past the last foreground pixel, matching "
+                          "src/utils.mask_to_box and tools/pack_dataset.py",
+             "n": len(index),
+             "boxes": {r["id"]: r["box"] for r in index}}
+    (out_root / "boxes.json").write_text(json.dumps(boxes, indent=1))
+    qc_dir.mkdir(parents=True, exist_ok=True)
+    (qc_dir / "annotation_index.json").write_text(json.dumps(index, indent=1))
+    for i in range(0, len(items), cols * 6):
+        contact_sheet(items[i:i + cols * 6], qc_dir / f"contact_sheet_{i // (cols * 6) + 1:02d}.png",
+                      cols=cols)
+    print(f"[rebuild] {len(index)} frames, {n_flagged} flagged, "
+          f"{len({r['gesture'] for r in index})} gestures, "
+          f"{len({(r['gesture'], r['clip']) for r in index})} clips")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--videos", required=True, help="flat folder of 20 clips, G01_call_clip01.mov")
     ap.add_argument("--out", required=True, help="smartphone_dataset/<studentno>_<surname>")
-    ap.add_argument("--backend", choices=["grabcut", "sam"], default="grabcut")
+    ap.add_argument("--backend", choices=["grabcut", "sam", "bgsub"], default="bgsub",
+                    help="bgsub: difference against a per-clip median background plate, then "
+                         "GrabCut refinement. The recorded backgrounds are skin-coloured walls, "
+                         "which defeat the chroma seed grabcut relies on.")
     ap.add_argument("--sam-ckpt", default=None)
     ap.add_argument("--frames-per-clip", type=int, default=3)
+    ap.add_argument("--rebuild-index", action="store_true",
+                    help="regenerate boxes.json and the QC sheet from the frames already written, "
+                         "then exit. Resume-safe: derived state is derived from disk.")
+    ap.add_argument("--cut-wrist", action="store_true", default=True,
+                    help="trim the forearm so masks match the RealSense hand-only convention")
+    ap.add_argument("--no-cut-wrist", dest="cut_wrist", action="store_false")
+    ap.add_argument("--resume", action="store_true", default=True,
+                    help="skip clips whose frames already exist (default on)")
+    ap.add_argument("--no-resume", dest="resume", action="store_false")
+    ap.add_argument("--max-clips", type=int, default=0,
+                    help="stop after this many clips; 0 means all")
+    ap.add_argument("--only", default=None,
+                    help="comma-separated gesture folders to process, e.g. G01_call,G02_dislike. "
+                         "Lets a full regeneration be split across several short runs.")
+    ap.add_argument("--scenes", default=None,
+                    help="comma-separated scene numbers to include, e.g. 2,3. The brief asks for "
+                         "two clips per gesture; three backgrounds were recorded.")
     ap.add_argument("--min-gap-s", type=float, default=1.0)
     ap.add_argument("--crop-43", action="store_true", default=True)
     ap.add_argument("--no-crop-43", dest="crop_43", action="store_false")
@@ -381,27 +711,77 @@ def main(argv=None) -> int:
     ap.add_argument("--qc-dir", default=None)
     a = ap.parse_args(argv)
 
-    vids = sorted(p for p in Path(a.videos).iterdir()
-                  if p.is_file() and NAME_RE.match(p.name))
+    if a.rebuild_index:
+        return rebuild_index(Path(a.out),
+                             Path(a.qc_dir) if a.qc_dir else Path(a.out).parent / "qc")
+
+    # Two accepted naming schemes: the guide's <gesture>_clipNN, and the as-recorded
+    # G<scene>_<gesture>. They are told apart by whether the word after the number is a gesture.
+    def parse(name: str):
+        m = NAME_RE.match(name)
+        if m and m.group(1) in GESTURE_SET:
+            return m.group(1), m.group(2).lower()
+        m = SCENE_RE.match(name)
+        if m:
+            g = GESTURE_BY_WORD.get(m.group(2).lower())
+            if g:
+                return g, f"clip{int(m.group(1)):02d}"
+        return None
+
+    vids = sorted((p for p in Path(a.videos).iterdir() if p.is_file() and parse(p.name)),
+                  key=lambda p: (parse(p.name)[0], parse(p.name)[1]))
+    if a.only:
+        want = {x.strip() for x in a.only.split(",")}
+        before = len(vids)
+        vids = [v for v in vids if parse(v.name)[0] in want]
+        print(f"[ann] gesture filter: {len(vids)} of {before} clips")
+    if a.scenes:
+        keep = {f"clip{int(x):02d}" for x in a.scenes.split(",")}
+        before = len(vids)
+        vids = [v for v in vids if parse(v.name)[1] in keep]
+        print(f"[ann] scene filter {sorted(keep)}: {len(vids)} of {before} clips")
     if not vids:
-        print(f"[error] no correctly-named clips in {a.videos}. Expected G01_call_clip01.mov etc.",
-              file=sys.stderr)
+        print(f"[error] no correctly-named clips in {a.videos}. Expected G02_call.MOV "
+              f"(scene 2, gesture call) or call_clip01.mov.", file=sys.stderr)
         return 2
     corrections = json.loads(Path(a.corrections).read_text()) if a.corrections else {}
     out_root = Path(a.out)
     qc_dir = Path(a.qc_dir) if a.qc_dir else out_root.parent / "qc"
     sheet_items, index, n_flagged = [], [], 0
+    scene_plates: dict = {}
 
     for v in vids:
-        m = NAME_RE.match(v.name)
-        gesture, clip = m.group(1), m.group(2).lower()
-        if gesture not in GESTURE_SET:
-            print(f"[warn] {v.name}: unknown gesture {gesture}, skipped", file=sys.stderr)
+        gesture, clip = parse(v.name)
+        # Resumable: a clip whose frames are already on disk is skipped, so the tool can be run
+        # repeatedly until the set is complete without redoing finished work.
+        done = out_root / gesture / clip / "rgb"
+        if a.resume and len(list(done.glob("frame_*.png"))) >= a.frames_per_clip:
+            print(f"[skip] {gesture}/{clip} already written")
             continue
         picks = sample_frames(v, a.frames_per_clip, a.min_gap_s)
+        plate = None
+        if a.backend == "bgsub":
+            # One plate per scene, built from every clip shot against that background.
+            if clip not in scene_plates:
+                sibs = [x for x in vids if parse(x.name)[1] == clip]
+                scene_plates[clip] = scene_plate(
+                    sibs, centre_crop_43 if a.crop_43 else None, EMIT_SIZE,
+                    cache=qc_dir / f"plate_{clip}.png")
+                print(f"[ann] background plate for {clip} from {len(sibs)} clips: "
+                      f"{'ok' if scene_plates[clip] is not None else 'FAILED'}")
+            plate = scene_plates[clip]
+            if plate is None:
+                plate = background_plate(v, centre_crop_43 if a.crop_43 else None, EMIT_SIZE)
+            if plate is None:
+                print(f"[warn] {v.name}: no background plate, falling back to grabcut",
+                      file=sys.stderr)
         for j, (fi, frame) in enumerate(picks, start=1):
             if a.crop_43:
                 frame = centre_crop_43(frame)
+            # Down to the RealSense release's resolution AFTER the crop, so the crop is computed
+            # on full detail and the emitted frame matches the set it is compared against.
+            if EMIT_SIZE and (frame.shape[1], frame.shape[0]) != EMIT_SIZE:
+                frame = cv2.resize(frame, EMIT_SIZE, interpolation=cv2.INTER_AREA)
             key = f"{gesture}/{clip}/{j:03d}"
             corr = corrections.get(key, {})
             if corr.get("drop"):
@@ -422,9 +802,21 @@ def main(argv=None) -> int:
                         print("[error] --backend sam needs --sam-ckpt", file=sys.stderr)
                         return 2
                     mask = propose_sam(frame, a.sam_ckpt, pt)
+                elif a.backend == "bgsub" and plate is not None:
+                    mask = propose_bgsub(frame, plate, pt)
                 else:
                     mask = propose_grabcut(frame, pt)
 
+            # Match the RealSense annotation convention: hand only, forearm excluded. The cut
+            # distance is in palm radii, and one value does not serve every pose: a bare hand
+            # needs a generous cut, a thick sleeved forearm held horizontally needs a tight one.
+            # Tighten until the result is a plausible hand size rather than guessing once.
+            if a.cut_wrist:
+                for k_try in (1.7, 1.3, 1.0, 0.8, 0.6):
+                    cut = cut_at_wrist(mask, k=k_try)
+                    if float((cut >= MASK_THRESH).mean()) <= REF["area_hi"]:
+                        break
+                mask = cut
             flags = qc_flags(mask)
             n_flagged += bool(flags)
             box = mask_to_box(mask)
@@ -432,6 +824,7 @@ def main(argv=None) -> int:
             cdir = out_root / gesture / clip
             (cdir / "rgb").mkdir(parents=True, exist_ok=True)
             (cdir / "annotation").mkdir(parents=True, exist_ok=True)
+
             cv2.imwrite(str(cdir / "rgb" / f"frame_{j:03d}.png"), frame)
             cv2.imwrite(str(cdir / "annotation" / f"frame_{j:03d}.png"), mask)
 

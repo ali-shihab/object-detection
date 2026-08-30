@@ -19,3 +19,12 @@ PyYAML>=6.0
 #                            # against sklearn; not needed to train or evaluate
 # segment-anything           # optional backend for tools/annotate_smartphone.py (annotation
 #                            # tooling only -- not part of the submitted model)
+
+# ----------------------------------------------------------------------------------------
+# ANNOTATION ONLY -- not imported by src/, not used at training or inference time.
+# These produce the smartphone ground-truth masks, following the Week-4 tutorial's pipeline
+# (SAM pre-annotation -> Label Studio refinement). Install only to reproduce the annotation:
+#     pip install segment-anything mediapipe
+# label-studio and label-studio-converter cannot be resolved into one environment; install
+# label-studio separately (see README s3).
+# ----------------------------------------------------------------------------------------

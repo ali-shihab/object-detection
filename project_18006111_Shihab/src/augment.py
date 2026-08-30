@@ -673,11 +673,14 @@ def augmix(img: np.ndarray, rng: np.random.Generator, strength: float = 1.0,
 # If it reused `_tone_lut` or `_saturation_matrix`, the "held-out transform family" claim in
 # s7.1 would be false: CPR could generate the exact operating point that all CPR strength and
 # variant selection is scored against, and the target-free protocol would be circular.
-# The S-curve is deliberately *stronger than CPR can draw*.  CPR perturbs 5 knots by at most
-# +/-0.10, so its curve at input 0.25 is never below 0.15 and at 0.75 never above 0.85; this one
-# sits at 0.11 and 0.89, outside that band by ~0.04 at both ends.  Without that margin the
-# "held-out family" is only held out on paper -- a 2000-draw search over CPR's stage 7 found
-# curves within 0.015 of an earlier, milder version of this table (tests/test_augment.py).
+# The S-curve is deliberately *stronger than CPR can draw* -- as a whole curve, not point by
+# point.  Over 200 CPR draws no draw tracks the composed pseudo-target transfer curve to within
+# 0.04 at every input level (closest 0.067), and that whole-curve separation is what
+# tests/test_augment.py asserts.  At either individual control point the pseudo-target value is
+# still inside CPR's realisable range: CPR spans [0.098, 0.447] at input 0.25 where this table
+# sits at 0.110, and [0.503, 0.979] at 0.75 where it sits at 0.890.  Without the whole-curve
+# margin the "held-out family" is only held out on paper -- a 2000-draw search over CPR's
+# stage 7 found curves within 0.015 of an earlier, milder version of this table.
 _PT_TONE_X = np.array([0.00, 0.10, 0.25, 0.50, 0.75, 0.90, 1.00])
 _PT_TONE_Y = np.array([0.00, 0.030, 0.110, 0.500, 0.890, 0.970, 1.00])
 _PSEUDO_TONE_LUT: np.ndarray = np.interp(

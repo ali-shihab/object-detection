@@ -1,9 +1,11 @@
+# Dataset paths are RELATIVE to the repository root so the submission runs as unpacked.
+# Override without editing:  python -m src.train --config configs/e1.yaml --set index_path=/abs/path
 # Shared configuration for every run in the study.
 # Experiment files override ONLY what differs, so any parameter absent from e1.yaml / e3.yaml is
 # provably identical between them -- which is what makes the E3-vs-E2 comparison a statement
 # about the augmentation and nothing else.
-index_path: /cs/student/project_msc/2025/rai/ashihab/comp0248_lsa/data/realsense_trainval/index.json
-test_index_path: /cs/student/project_msc/2025/rai/ashihab/comp0248_lsa/data/realsense_test/index.json
+index_path: data/realsense_trainval/index.json
+test_index_path: data/realsense_test/index.json
 img_size: [384, 288]
 batch_size: 48
 num_workers: 12
