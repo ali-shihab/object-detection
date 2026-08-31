@@ -332,8 +332,17 @@ def test_clip_weighting_differs_from_frame() -> None:
 
 
 def test_against_sklearn() -> None:
-    """Cross-check our confusion matrix and macro-F1 against sklearn on the same records."""
-    from sklearn.metrics import confusion_matrix, f1_score
+    """Cross-check our confusion matrix and macro-F1 against sklearn on the same records.
+
+    scikit-learn is a development-only dependency (requirements.txt keeps it commented out), so
+    this suite has to pass without it: an optional cross-check that fails when the optional
+    package is absent is a broken test, not a strict one.
+    """
+    try:
+        from sklearn.metrics import confusion_matrix, f1_score
+    except ImportError:
+        print("  skip test_against_sklearn (scikit-learn not installed)")
+        return
 
     acc = MetricAccumulator()
     recs = _records()

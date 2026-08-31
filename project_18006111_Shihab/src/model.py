@@ -350,10 +350,11 @@ class HandNet(nn.Module):
         # This is not cosmetic. A freshly-initialised BatchNorm network in *train* mode whitens
         # every stage, and the accumulated gain drives the stride-4 head logits to +/-27 --
         # measured, not assumed. The focal loss then charges ~9.2 nats for every cell the
-        # network confidently and wrongly calls foreground, and the total lands near 800 at
-        # step 0 (vs ~4 with this init). Warmup would eventually pull it back, but the first
-        # gradients are dominated by noise the head invented. CenterNet zero-inits its heads
-        # for exactly this reason.
+        # network confidently and wrongly calls foreground, and the total lands at 13,455 at
+        # step 0 on a noise batch (11,911 on a photo-like one) against 14.7 with this init --
+        # re-measured; an earlier comment here quoted ~800 vs ~4 from a smaller probe. Warmup
+        # would eventually pull it back, but the first gradients are dominated by noise the head
+        # invented. CenterNet zero-inits its heads for exactly this reason.
         for head in ("heat_head", "size_head", "off_head", "seg_out"):
             mod = getattr(self, head, None)
             if mod is None:

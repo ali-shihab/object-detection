@@ -20,7 +20,7 @@ project_18006111_Shihab/
 │   ├── 18006111_Shihab/          # the 60-frame smartphone test set (10 gestures x 2 clips x 3)
 │   │   └── G01_call/clip02/{rgb,annotation}/frame_001.png ...
 │   ├── raw_videos/               # source clips -- EXCLUDED from the submitted zip (size)
-│   └── RECORDING_GUIDE.md        # the capture protocol these clips were shot to
+│   └── RECORDING_GUIDE.md        # the intended capture protocol, with its deviation record
 ├── src/
 │   ├── utils.py                  # box ops, metrics, MetricAccumulator, seeding, IO
 │   ├── model.py                  # HandNet: encoder + U-Net decoder + centre-point head + classifier
@@ -35,18 +35,39 @@ project_18006111_Shihab/
 │   ├── annotate_smartphone_sam.py # SAM pre-annotation of the smartphone masks (see s8)
 │   ├── baseline_classical.py     # the non-deep baseline (skin + HOG + softmax regression)
 │   └── make_report_tables.py     # result JSONs -> the report's LaTeX tables
-├── configs/                      # base.yaml + one file per mandatory experiment
+├── configs/                      # base.yaml + e1.yaml and e3.yaml (E2 trains nothing)
 ├── tests/                        # four suites, plain asserts, no pytest needed
-├── weights/                      # e1_best.pt, e3_best.pt (EMA weights only; see s8)
-├── results/                      # metric JSONs, comparison CSVs, figures
+├── weights/
+│   ├── e1_best.pt                # Experiment 1's checkpoint (run `e1`, EMA weights)
+│   └── e3_best.pt                # Experiment 3's checkpoint (run `e3`, EMA weights)
+├── results/
+│   ├── <run>_<split>.json        # every metric the brief asks for, per run and split
+│   ├── <run>_<split>_predictions.csv  # per-image box IoU, mask IoU, class, confidence
+│   ├── figures/                  # confusion matrices, reliability diagrams, overlays, curves
+│   └── runs/<run>/               # each run's resolved config.json and per-epoch log.jsonl
 ├── requirements.txt
 └── README.md
 ```
 
-Everything needed to reproduce the results is inside this directory: every command below runs
-from this directory, in the tree that is handed in. The cluster orchestration scripts used to
-drive the UCL GPU host are development infrastructure and are documented separately; they are
-not required to run any of the above.
+`weights/` holds two checkpoints because the brief's Experiment 2 reuses Experiment 1's: E2 is
+`e1_best.pt` evaluated on the smartphone set, not a third model. The names are the experiment's,
+not a run's -- `e3_best.pt` is the checkpoint of the run named `e3`. (`results/runs/` also lists a
+separate run called `e3_best`; that is an ablation, and its checkpoint is not shipped.)
+
+The report shows one confusion matrix, because it is capped at six pages. The full set the brief
+asks for -- every mandatory experiment on val, RealSense test and the smartphone set -- is in
+`results/figures/cm_*.pdf`, alongside a reliability diagram per run.
+
+Every command below runs from this directory. Everything needed to reproduce the results is
+here except the two things that cannot be: the supplied RealSense archives, which the brief
+forbids redistributing (§3 rebuilds the packed form from them), and the packed indexes derived
+from them (§5). The cluster orchestration scripts that drove the UCL GPU host are development
+infrastructure and are not required to run anything here.
+
+Source comments cite the project's design documents by name (`02_DESIGN.md`, `01_DATA.md`,
+`INTERFACES.md`, `03_IMPLEMENTATION.md`). Those are working material rather than deliverables and
+are deliberately not in this submission; every comment that cites one states its reasoning in
+full first, so nothing here depends on reading them.
 
 ## 2. Environment
 
@@ -55,6 +76,10 @@ python -m venv .venv && source .venv/bin/activate
 pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 ```
+
+The first §3 command reads the release as a `.7z` archive and shells out to the `7z` binary
+(`brew install p7zip` / `apt install p7zip-full`); pass an already-extracted directory instead and
+it is not needed. Nothing else here shells out.
 
 Results in the report were produced with Python 3.11.14, torch 2.6.0+cu124, on one NVIDIA
 RTX 4070 Ti SUPER (16 GB, sm_89) under Rocky Linux 9.8 — one of two UCL CS Knuckles GPU hosts the
@@ -76,6 +101,9 @@ python tools/pack_dataset.py --src "Test data-COMP0248_Test_data_23" \
     --out data/realsense_test --packed-size 512 384 --test --subject-name test23
 
 # smartphone test set (already packed in this submission; this is how it was made).
+# Step 1 needs smartphone_dataset/raw_videos/, which is excluded from the zip for size --
+# the 60 extracted frames and their masks are shipped, so steps 1-3 need only be re-run to
+# rebuild the set from scratch.
 # Follows the Week-4 tutorial: SAM pre-annotation -> Label Studio refinement -> decode.
 # Step 1 -- frame extraction from the recordings:
 python tools/annotate_smartphone.py --videos smartphone_dataset/raw_videos \
@@ -102,8 +130,9 @@ python -m src.train --config configs/e1.yaml --out runs/e1     # Experiment 1 ba
 python -m src.train --config configs/e3.yaml --out runs/e3     # Experiment 3 (+CPR)
 ```
 
-`configs/e1.yaml` and `configs/e3.yaml` differ in exactly one line (`photometric`), so the
-E3-vs-E2 comparison is a statement about the augmentation and nothing else. Any field can be
+`configs/e1.yaml` and `configs/e3.yaml` differ in one substantive field, `photometric` --- plus
+`tag`, which is only the run's name and is read by nothing. So the E3-vs-E2 comparison is a
+statement about the augmentation and nothing else. Any field can be
 overridden on the command line, which is how the ablations are run:
 
 ```bash
@@ -121,26 +150,43 @@ python -m src.train --config configs/e3.yaml --out runs/no_giou --set w_giou=0.0
 python -m src.train --config configs/e1.yaml --out runs/warm5 --set warmup_epochs=5 --set min_lr_factor=0.05
 ```
 
-This exists so that no ablation ever has to be run by hand-editing a config file: the command
-line is recorded in `runs/<name>/config.json`, an edited config is not.
+This exists so that no ablation has to be run by hand-editing a config file: every run writes
+its fully resolved configuration --- base file, config file and command-line overrides collapsed
+into one record --- to `runs/<name>/config.json`, so a run is reproducible from its own record
+rather than from whatever the config file says today. All 39 of those records ship, under
+`results/runs/`.
 
 Training is resumable (`--resume auto`) and checkpoints every epoch — the GPU host can be
 reclaimed at any time. `--dry-run N` runs N steps plus one evaluation, as a smoke test.
 
 ## 5. Evaluation
 
+Evaluation reads a **packed index**, which is built by `tools/pack_dataset.py` and is not in
+this zip: the RealSense indexes cannot ship (the brief forbids redistributing that data), and the
+smartphone one is derived rather than stored. Build the smartphone index from the data that *is*
+here, in one command, before running the two smartphone evaluations:
+
 ```bash
-python -m src.evaluate --ckpt runs/e1/best.pt --index data/realsense_test/index.json \
+python tools/pack_dataset.py --src smartphone_dataset/18006111_Shihab \
+    --out data/phone_test --packed-size 512 384 --test --subject-name 18006111_Shihab
+```
+
+The RealSense index needs the released archives first (§3). The commands below then run against
+the shipped checkpoints; training writes its own to `runs/<name>/best.pt`, so substitute that path
+to evaluate a model you have just trained.
+
+```bash
+python -m src.evaluate --ckpt weights/e1_best.pt --index data/realsense_test/index.json \
     --split test --out results/e1_rs_test.json --examples 24 \
     --examples-out results/e1_examples.npz
 
 # Experiment 2: the SAME checkpoint, unchanged, on the smartphone set.
 # NOTE the filename: E2 is the E1 checkpoint, so its result file is e1_phone.json.
-python -m src.evaluate --ckpt runs/e1/best.pt --index data/phone_test/index.json \
+python -m src.evaluate --ckpt weights/e1_best.pt --index data/phone_test/index.json \
     --split test --out results/e1_phone.json
 
 # Experiment 3 on the same smartphone set
-python -m src.evaluate --ckpt runs/e3/best.pt --index data/phone_test/index.json \
+python -m src.evaluate --ckpt weights/e3_best.pt --index data/phone_test/index.json \
     --split test --out results/e3_phone.json
 ```
 
@@ -151,10 +197,36 @@ files that produced it.
 
 ## 6. Figures
 
+The overlay dumps (`*_examples.npz`, ~13 MB each) are stripped from the zip for size. `--examples`
+is optional --- without it every figure but the qualitative overlay is drawn; the §5 evaluation
+command regenerates the dump it needs.
+
 ```bash
-python -m src.visualise --results results/*.json --curves runs/e1/log.jsonl \
-    --examples results/e1_examples.npz --aug-source <a-frame.jpg> --out results/figures
+python -m src.visualise --results results/*.json --curves results/runs/e1/log.jsonl \
+    --aug-source <a-frame.jpg> --out results/figures                       # all but Fig. 2
+
+python -m src.evaluate --ckpt weights/e3_best.pt --index data/phone_test/index.json \
+    --split test --out results/e3_phone.json --examples 24 \
+    --examples-out results/e3_phone_examples.npz                           # then Fig. 2
+python -m src.visualise --results results/*.json --examples results/e3_phone_examples.npz \
+    --out results/figures
 ```
+
+The report's tables are generated from the same JSONs, so no number in it is transcribed:
+
+```bash
+python tools/make_report_tables.py --results results --out <report-dir>/generated
+```
+
+Tests:
+
+```bash
+for t in tests/test_*.py; do python "$t" || break; done
+```
+
+Four suites of plain asserts: metrics and box ops against hand-worked values (and, if
+`scikit-learn` is installed, against it), model shapes and parameter count, the dataloader's
+sparse-mask handling, and every augmentation's invariants.
 
 ## 7. Reproducibility notes
 
@@ -177,7 +249,9 @@ are loaded — the network is trained from random initialisation. Box IoU, GIoU,
 Gaussian target rendering and every augmentation operation are implemented in this repository.
 One qualification, stated rather than buried. The smartphone ground-truth masks were built with
 `tools/annotate_smartphone_sam.py`, which loads a pretrained **Segment Anything** checkpoint and
-uses **MediaPipe**'s hand landmarker to place SAM's prompt. Both are **annotation tooling**: they
+uses **MediaPipe**'s hand landmarker to place SAM's prompt. (`tools/annotate_smartphone.py` also
+carries an optional SAM backend behind `--backend sam`; it was not used for the shipped masks and
+is subject to everything said here.) Both are **annotation tooling**: they
 run once, offline, to produce ground truth. Neither is imported by `src/`, runs at training or
 inference time, or contributes to any reported prediction — the restrictions the brief imposes are
 on the *submitted model*, which loads no pretrained weights of any kind.

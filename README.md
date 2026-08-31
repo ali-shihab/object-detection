@@ -20,7 +20,3 @@ know are deliberately absent:
 * **The supplied RealSense datasets** — the brief forbids redistributing them;
   `project_18006111_Shihab/tools/pack_dataset.py` rebuilds the packed form from the released
   archives.
-
-The supplied RealSense datasets are deliberately **not** in this repository, as the brief
-requires; `project_18006111_Shihab/tools/pack_dataset.py` rebuilds the packed form from the
-released archives.

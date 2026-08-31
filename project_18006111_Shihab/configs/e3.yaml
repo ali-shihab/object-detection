@@ -2,9 +2,10 @@
 # Identical to e1 in every respect except the photometric augmentation, which becomes
 # Camera-Pipeline Randomisation (02_DESIGN.md s7). No smartphone data is used in training.
 #
-# This file overlays base.yaml and sets ONE substantive field. `diff e1.yaml e3.yaml` showing
-# a single value line is the whole point: it is what makes the E3-vs-E2 comparison a statement
-# about the augmentation and nothing else.
+# This file overlays base.yaml and sets ONE substantive field. `diff e1.yaml e3.yaml` shows two
+# value lines, `photometric` and `tag`; `tag` is only the run's name and is read by nothing, so
+# the augmentation is the entire difference. That is what makes the E3-vs-E2 comparison a
+# statement about the augmentation and nothing else.
 extends: base.yaml
 photometric: cpr
 tag: e3

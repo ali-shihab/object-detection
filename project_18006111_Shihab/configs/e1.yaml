@@ -6,7 +6,8 @@
 # the smartphone set (same weights, same preprocessing, no fine-tuning -- LSA p8).
 #
 # This file overlays base.yaml and sets ONE substantive field. Everything else is therefore
-# identical to e3.yaml by construction, not by two copies happening to agree.
+# identical to e3.yaml by construction, not by two copies happening to agree -- the only other
+# line that differs is `tag`, the run's name, which is read by nothing.
 extends: base.yaml
 photometric: jitter
 tag: e1

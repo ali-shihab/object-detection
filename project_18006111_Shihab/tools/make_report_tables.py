@@ -34,12 +34,13 @@ sys.path.insert(0, str(_ROOT))
 from src import utils                                       # noqa: E402
 
 HEADLINE = [
-    ("det_acc@0.5", "Det.\\ acc@0.5", 3),
-    ("mean_box_iou", "Mean box IoU", 3),
-    ("seg_iou_hand", "Hand IoU", 3),
-    ("seg_dice", "Dice", 3),
-    ("cls_top1", "Top-1", 3),
-    ("cls_macro_f1", "Macro-F1", 3),
+    ("det_acc@0.5", "Det.\\ acc@0.5", 3, True),
+    ("mean_box_iou", "Mean box IoU", 3, True),
+    ("seg_iou_hand", "Hand IoU", 3, True),
+    ("seg_miou", "mIoU", 3, False),
+    ("seg_dice", "Dice", 3, True),
+    ("cls_top1", "Top-1", 3, True),
+    ("cls_macro_f1", "Macro-F1", 3, True),
 ]
 
 
@@ -88,11 +89,14 @@ def table_main(R: dict, out: Path) -> None:
         ("E3 (CPR)", "smartphone", "e3_phone"),
     ]
     L = [r"\begin{table*}[!tb]", r"\centering",
+         r"\footnotesize\setlength{\tabcolsep}{4pt}",
          r"\caption{Mandatory experiments; per-frame metrics, bracketed figures are bootstrap "
          r"95\% intervals over clips. E2 is the E1 checkpoint evaluated unchanged on the "
          r"smartphone set --- same weights, same preprocessing, no fine-tuning. Each row is one "
          r"training run, the checkpoint shipped in \texttt{weights/}, so the intervals are "
-         r"sampling error over clips and not seed-to-seed variability, which is in the text.}",
+         r"sampling error over clips and not seed-to-seed variability, which is in the text. "
+         r"mIoU is the two-class hand/background mean and carries a 0.97 background floor, so "
+         r"hand IoU is given beside it.}",
          r"\label{tab:main}",
          r"\begin{tabular}{ll" + "c" * len(HEADLINE) + "}", r"\toprule",
          "Model & Evaluation set & " + " & ".join(h[1] for h in HEADLINE) + r" \\", r"\midrule"]
@@ -101,7 +105,8 @@ def table_main(R: dict, out: Path) -> None:
         if d is None:
             L.append(f"{esc(name)} & {esc(split)} & " + " & ".join(["--"] * len(HEADLINE)) + r" \\")
             continue
-        cells = [fmt(val(d, k), nd, d.get("ci", {}).get(k)) for k, _, nd in HEADLINE]
+        cells = [fmt(val(d, k), nd, d.get("ci", {}).get(k) if ci else None)
+                 for k, _, nd, ci in HEADLINE]
         L.append(f"{esc(name)} & {esc(split)} & " + " & ".join(cells) + r" \\")
     L += [r"\bottomrule", r"\end{tabular}", r"\end{table*}"]
     (out / "tbl_main.tex").write_text("\n".join(L) + "\n")
@@ -116,12 +121,17 @@ def table_gain(R: dict, out: Path) -> None:
          r"photometric augmentation.}",
          r"\label{tab:gain}", r"\begin{tabular}{lccc}", r"\toprule",
          r"Metric & E2 (zero-shot) & E3 (+CPR) & $\Delta$ \\", r"\midrule"]
-    for k, label, nd in HEADLINE:
+    for k, label, nd, _ci in HEADLINE:
         a, b = (val(e2, k) if e2 else None), (val(e3, k) if e3 else None)
         d = None if (a is None or b is None) else b - a
-        arrow = "" if d is None else (r"\,$\uparrow$" if d > 0 else r"\,$\downarrow$")
-        L.append(f"{label} & {fmt(a, nd)} & {fmt(b, nd)} & "
-                 f"{'--' if d is None else f'{d:+.{nd}f}{arrow}'} \\\\")
+        dr = None if d is None else round(d, nd)
+        if dr is None:
+            cell = "--"
+        elif dr == 0:
+            cell = f"{0.0:.{nd}f}"                          # unchanged to the printed precision
+        else:
+            cell = f"{d:+.{nd}f}" + (r"\,$\uparrow$" if dr > 0 else r"\,$\downarrow$")
+        L.append(f"{label} & {fmt(a, nd)} & {fmt(b, nd)} & {cell} \\\\")
     L += [r"\bottomrule", r"\end{tabular}", r"\end{table}"]
     (out / "tbl_gain.tex").write_text("\n".join(L) + "\n")
 
@@ -159,6 +169,9 @@ def _absent_metrics(d: dict) -> set:
     return {m for h, ms in HEAD_SUBSET.items() if h not in heads for m in ms}
 
 
+ABL_COLS = [h for h in HEADLINE if h[0] != "seg_miou"]
+
+
 def table_ablation(R: dict, out: Path, split: str = "rs_test") -> None:
     """The ablation grid. Deltas, because absolute numbers hide small effects."""
     # \footnotesize and a tighter column separation are page-budget decisions, not cosmetics: the
@@ -171,21 +184,21 @@ def table_ablation(R: dict, out: Path, split: str = "rs_test") -> None:
          rf"quoted in the text is not a result; a dash marks a metric a configuration cannot "
          rf"produce. Per-seed repeats are summarised in the text.}}",
          r"\label{tab:ablation}",
-         r"\begin{tabular}{l" + "c" * len(HEADLINE) + "}", r"\toprule",
-         "Run & " + " & ".join(h[1] for h in HEADLINE) + r" \\"]
+         r"\begin{tabular}{l" + "c" * len(ABL_COLS) + "}", r"\toprule",
+         "Run & " + " & ".join(h[1] for h in ABL_COLS) + r" \\"]
     for title, pat, ref in ABL_GROUPS:
         keys = sorted(k for k in R
                       if k.endswith("_" + split) and re.search(pat, k.replace("_" + split, "")))
         if not keys:
             continue
-        L += [r"\midrule", rf"\multicolumn{{{len(HEADLINE) + 1}}}{{l}}{{\textit{{{title}}}}} \\"]
+        L += [r"\midrule", rf"\multicolumn{{{len(ABL_COLS) + 1}}}{{l}}{{\textit{{{title}}}}} \\"]
         base = R.get(f"{ref}_{split}") if ref else None
         for k in keys:
             d = R[k]
             name = k.replace("_" + split, "")
             cells = []
             absent = _absent_metrics(d)
-            for mk, _, nd in HEADLINE:
+            for mk, _, nd, _ci in ABL_COLS:
                 v = None if mk in absent else val(d, mk)
                 if v is None:
                     cells.append("--")

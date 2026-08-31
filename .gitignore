@@ -12,7 +12,6 @@ annotations.json
 # --- supplied datasets: the brief forbids redistributing them, and they are GBs ---
 data/
 project_18006111_Shihab/results/artifacts/
-project_18006111_Shihab/results/runs/
 project_18006111_Shihab/results/results/
 project_18006111_Shihab/results/**/*.npz
 *.7z
@@ -26,6 +25,12 @@ project_18006111_Shihab/weights/*.pth
 # --- raw phone footage is source material; the 60 annotated frames are the dataset ---
 project_18006111_Shihab/smartphone_dataset/raw_videos/
 project_18006111_Shihab/smartphone_dataset/qc/
+
+# --- duplicates and cross-deliverable build artefacts ---
+# results/logs/ is a byte-identical copy of results/runs/, which is the one the README documents.
+project_18006111_Shihab/results/logs/
+# The generated LaTeX tables belong to the report, not to results/.
+project_18006111_Shihab/results/*.tex
 
 # --- build artefacts and archives ---
 *.zip
@@ -43,5 +48,6 @@ __pycache__/
 *.fdb_latexmk
 *.synctex.gz
 
-# stray archive left by make_submission.sh (no extension, so not caught by *.zip)
-ziiYeDKA
+# Stray extensionless archives left in the repo root by earlier make_submission.sh runs; the
+# name is random each time, so match the shape rather than one instance.
+/zi??????

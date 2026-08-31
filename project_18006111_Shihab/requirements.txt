@@ -17,8 +17,8 @@ PyYAML>=6.0
 # --- development only -------------------------------------------------------------------
 # scikit-learn>=1.4          # tests/test_utils.py cross-checks our classification metrics
 #                            # against sklearn; not needed to train or evaluate
-# segment-anything           # optional backend for tools/annotate_smartphone.py (annotation
-#                            # tooling only -- not part of the submitted model)
+# segment-anything           # loaded by tools/annotate_smartphone_sam.py (annotation tooling
+# mediapipe                  # only -- neither is imported by src/ or part of the submitted model)
 
 # ----------------------------------------------------------------------------------------
 # ANNOTATION ONLY -- not imported by src/, not used at training or inference time.
