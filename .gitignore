@@ -2,6 +2,9 @@
 # project_18006111_Shihab/ (src, tools, configs, tests, smartphone_dataset, results) and a README.
 # Working material that is not a deliverable is kept out.
 
+# --- ignored for privacy ---
+project_18006111_Shihab/smartphone_dataset/
+
 # --- not deliverables ---
 docs/
 scripts/
