@@ -75,8 +75,8 @@ def _errorbars(vals, lo, hi, where=""):
     matplotlib raises on a negative yerr, which kills the whole figure run. A point estimate can
     legitimately fall outside its own interval here: the interval is a percentile bootstrap over
     clips, and an evaluation run with a small --n-boot produces a degenerate interval that need
-    not bracket anything. Clamping keeps the figure honest -- a zero-length bar on that side is
-    exactly the right thing to draw for an interval that does not extend there -- and says so
+    not bracket anything. Clamping keeps the figure honest - a zero-length bar on that side is
+    exactly the right thing to draw for an interval that does not extend there - and says so
     rather than failing or silently drawing a mirror image.
     """
     lower = np.nan_to_num(np.asarray(vals, float) - np.asarray(lo, float))
@@ -174,7 +174,7 @@ def plot_qualitative(examples, out_path, n_cols: int = 4, show_gt: bool = True,
                            linewidths=0.7, linestyles="dotted")
 
         # Ground truth is drawn FIRST and slightly heavier, so that when the two boxes very
-        # nearly coincide -- which is the common case at 0.84 mean IoU -- the dashed white line
+        # nearly coincide - which is the common case at 0.84 mean IoU - the dashed white line
         # still shows through the solid prediction rather than being completely hidden by it.
         # A figure in which the ground truth is invisible reads as if it were never plotted.
         if show_gt and e.get("has_mask", True):
@@ -254,7 +254,7 @@ def plot_training_curves(jsonl_path, out_path, keys=None, title=None,
     val_keys = [k for k in rows[-1] if k.startswith("val/")]
 
     # Side by side, the two panels' legends collide with each other's axis labels below about
-    # 5 inches -- which is every column-width use. Below that, stack the two panels instead of
+    # 5 inches - which is every column-width use. Below that, stack the two panels instead of
     # letting them overlap, and let tight_layout resolve the spacing rather than bbox_inches,
     # which only trims the outside and cannot fix an interior collision.
     wide = width >= 5.0
@@ -311,8 +311,8 @@ def plot_ablation_bars(rows, metric, out_path, baseline_key=None, title=None,
         raise ValueError("no rows")
 
     # Keep the chart readable. At 0.26 in per bar, every row of a 121-row comparison table makes
-    # a figure 32 in tall for a 3.35 in slot. Keep the most extreme rows -- those are the ones a
-    # reader is looking for -- plus the reference runs, which have to be present for any of the
+    # a figure 32 in tall for a 3.35 in slot. Keep the most extreme rows - those are the ones a
+    # reader is looking for - plus the reference runs, which have to be present for any of the
     # others to mean anything.
     if len(rows) > max_rows:
         keep = {str(r.get(label_key)) for r in rows if str(r.get(label_key)) in set(always_keep)}
@@ -462,7 +462,7 @@ def plot_domain_gap(result_paths, labels, out_path, metrics=None, title=None,
     # slightly taller figure.
     # Two legend columns, not four. bbox_inches="tight" grows the saved figure to fit whatever
     # the legend needs, so a single wide row silently makes the figure 1.5x wider than the column
-    # it is printed in -- and \includegraphics then scales every label down to compensate.
+    # it is printed in - and \includegraphics then scales every label down to compensate.
     ax.legend(frameon=False, ncol=2 if width < 5.0 else min(4, n_series), loc="lower center",
               bbox_to_anchor=(0.5, 1.01), borderaxespad=0.0)
     if title:

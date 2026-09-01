@@ -75,7 +75,7 @@ class Config:
     use_mask_attn_pool: bool = True
     heads: tuple[str, ...] = ("det", "seg", "cls")
 
-    # loss weights (02_DESIGN.md s4)
+    # loss weights
     w_heat: float = 1.0
     w_size: float = 0.1
     w_off: float = 1.0
@@ -194,8 +194,7 @@ class UncertaintyWeights(nn.Module):
     """Learnable homoscedastic task weighting (Kendall, Gal & Cipolla, CVPR 2018).
 
     ``L = sum_i exp(-s_i) * L_i + s_i`` with ``s_i = log(sigma_i^2)`` learned. Off by default
-    (``loss_weighting="fixed"``): on a dataset this small it is one more thing that can drift,
-    and 02_DESIGN.md s4 reports it as an ablation rather than adopting it unmeasured.
+    (``loss_weighting="fixed"``): on a dataset this small it is one more thing that can drift.
     """
 
     def __init__(self, names: list[str]) -> None:
@@ -212,7 +211,7 @@ class UncertaintyWeights(nn.Module):
 
 
 class MultiTaskLoss(nn.Module):
-    """Composes the six loss terms of 02_DESIGN.md s4 and applies the sparse-mask rule."""
+    """Composes the six loss terms and applies the sparse-mask rule."""
 
     def __init__(self, cfg: Config) -> None:
         super().__init__()

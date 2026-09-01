@@ -1,18 +1,18 @@
 """Dataset and DataLoader construction for the packed RealSense / smartphone releases.
 
-Reads the ``index.json`` written by ``tools/pack_dataset.py`` -- one packed JPEG per frame at
+Reads the ``index.json`` written by ``tools/pack_dataset.py`` - one packed JPEG per frame at
 512x384, an optional packed PNG mask, and a box already expressed in packed-image pixels.  The
 record fields and the ``ann: null`` convention are the packer's; this module is the only reader
 and deliberately mirrors it field for field.
 
 What a sample is
 ----------------
-``{"image", "mask", "box", "label", "has_mask"}`` as fixed by ``INTERFACES.md``.  ``has_mask``
+``{"image", "mask", "box", "label", "has_mask"}``.  ``has_mask``
 is the contract that keeps unannotated frames honest: the brief's training release annotates
-only a couple of keyframes per clip while every frame carries a clip-level gesture label
-(`02_DESIGN.md` s4.1), so an unannotated frame must still reach the classifier while being
+only a couple of keyframes per clip while every frame carries a clip-level gesture label,
+so an unannotated frame must still reach the classifier while being
 invisible to the detection and segmentation losses.  Those frames get a **zero mask and a zero
-box** purely so that ``default_collate`` has something to stack -- they are not targets, and
+box** purely so that ``default_collate`` has something to stack - they are not targets, and
 anything that consumes ``box``/``mask`` without first filtering on ``has_mask`` is a bug.
 """
 
@@ -33,16 +33,16 @@ from src.utils import IMAGENET_MEAN, IMAGENET_STD, load_json, mask_to_box
 
 __all__ = ["HandGestureDataset", "EmptySplitError", "build_loaders", "worker_init_fn"]
 
-MASK_THRESH = 128  # 01_DATA.md s2: released masks are anti-aliased, not strictly {0,255}
+MASK_THRESH = 128
 
 # Process-wide, at import, and deliberately so.  OpenCV's pthread pool is not fork-safe: once
 # the *parent* has run any threaded cv2 call, `fork`ing a DataLoader worker leaves the child
-# holding the pool's mutexes and the first cv2 call in that worker deadlocks -- silently, with
+# holding the pool's mutexes and the first cv2 call in that worker deadlocks - silently, with
 # no traceback and no timeout.  Verified here: a parent that reads a dozen samples before
 # building a `num_workers=2` loader hangs forever without this line and runs in 0.1 s with it.
 # `setNumThreads(0)` does *not* fix it (0 means "auto", not "none"); 1 does, whether set before
 # or after the parent's cv2 work.  Importing this module is the declaration that the process
-# intends to fork data workers, so this is the honest place for it -- and per-image threading
+# intends to fork data workers, so this is the honest place for it - and per-image threading
 # is worthless anyway when the parallelism is already one process per worker.
 cv2.setNumThreads(1)
 
@@ -66,7 +66,7 @@ class HandGestureDataset(Dataset):
 
     Args:
         index_path: path to ``index.json``.
-        split: value to match in the index's ``split_map`` -- ``"train"``/``"val"`` for a
+        split: value to match in the index's ``split_map`` - ``"train"``/``"val"`` for a
             training pack, ``"test"`` for one packed with ``--test`` (which maps every
             contributor to ``"test"``), ``"phone"`` for a smartphone pack whose ``split_map``
             names that split.  An unmatched split raises rather than yielding an empty dataset,
@@ -75,7 +75,7 @@ class HandGestureDataset(Dataset):
         aug: an :class:`~src.augment.AugmentPolicy`, or ``None`` for a fully deterministic
             read (validation and test: no randomness anywhere, just a resize).
         return_meta: attach ``{"clip_key", "subject", "frame"}``, which ``evaluate.py`` needs
-            to aggregate metrics per clip as well as per frame (`02_DESIGN.md` s9).
+            to aggregate metrics per clip as well as per frame.
     """
 
     def __init__(self, index_path: str, split: str, img_size: tuple[int, int] = (384, 288),
@@ -138,7 +138,7 @@ class HandGestureDataset(Dataset):
                 # free reinterpretation of the bool buffer as {0,1} uint8.
                 box = mask_to_box(mask.view(np.uint8), thresh=1)
             else:
-                # A near-degenerate hand (01_DATA.md s2.8 lists three masks under 150 px) can
+                # A near-degenerate hand can
                 # vanish under crop+downscale.  Demote to classification-only rather than
                 # emitting a degenerate target; this is the *only* case where has_mask is
                 # False for a frame that does carry an annotation.
@@ -161,7 +161,7 @@ class HandGestureDataset(Dataset):
                 "subject": rec["subject"], "frame": int(rec["frame"]),
                 # Carried so evaluate.py can write a per-image prediction row that names the
                 # exact source frame. Costs three strings per item and only when return_meta
-                # is on, which is eval-only -- training never builds this dict.
+                # is on, which is eval-only - training never builds this dict.
                 "id": str(rec.get("id", "")), "rgb": str(rec.get("rgb", "")),
                 "gesture": str(rec.get("gesture", "")),
             }
@@ -198,14 +198,14 @@ def build_loaders(cfg: Any) -> dict[str, DataLoader]:
     ``index_path``      index.json for the training pack (train + val splits)
     ``test_index_path`` index.json for a pack made with ``--test`` (or a phone pack)
     ``splits``          which of ``("train","val","test")`` to build; default all available
-    ``img_size``        ``(W,H)``, default ``(384,288)`` (`02_DESIGN.md` s2)
+    ``img_size``        ``(W,H)``, default ``(384,288)``
     ``batch_size``      default 32; ``eval_batch_size`` defaults to it
     ``num_workers``     default 4
     ``pin_memory``      default ``torch.cuda.is_available()``
     ``persistent_workers`` default ``num_workers > 0``
     ``prefetch_factor``  default None (torch's own default)
     ``drop_last``       train only, default True
-    ``seed``            default 0 -- seeds the train loader's generator *and* the policy
+    ``seed``            default 0 - seeds the train loader's generator *and* the policy
     ``geometric``       default True
     ``photometric``     default ``"jitter"``; ``"cpr"`` for E3
     ``cpr_stages``      iterable of stage names, or None for all (block-B ablations)
@@ -218,7 +218,7 @@ def build_loaders(cfg: Any) -> dict[str, DataLoader]:
     ``split_map`` genuinely says ``"phone"`` is read directly with
     ``HandGestureDataset(index, "phone", ...)``.
 
-    The train sampler is **plain shuffling**.  No class-balanced sampler: `01_DATA.md` s2.2
+    The train sampler is **plain shuffling**.  No class-balanced sampler:
     measures the classes as exactly uniform (23 clips / 345 frames each), so a balancing
     sampler would resample nothing while adding an unexplained confounder to every ablation.
     """

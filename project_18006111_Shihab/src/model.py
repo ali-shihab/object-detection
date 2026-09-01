@@ -1,7 +1,5 @@
 """Multi-task hand network: box + mask + gesture + confidence from one RGB image.
 
-Implements `docs/02_DESIGN.md` s3 to the frozen contract in `docs/INTERFACES.md`.
-
 Everything here is built from `torch.nn` primitives. Nothing is imported from
 `torchvision.models`, `torchvision.ops`, `timm`, or any detection/segmentation library, and no
 pretrained weights are loaded (COMP0248 LSA p10/p11).
@@ -31,13 +29,10 @@ DET_STRIDE: int = 4
 #: Bias of the final `heat` convolution. Focal-loss prior trick (RetinaNet / CenterNet): start
 #: with sigmoid(bias) = p so the ~99.99% of background cells contribute almost no loss in the
 #: first epochs, instead of drowning the handful of positives. NOTE: -2.19 is the CenterNet
-#: constant and corresponds to p = 0.1, i.e. -log((1 - 0.1) / 0.1). 02_DESIGN.md quotes it
-#: alongside "p = 0.01", which would be -4.595 -- the number, not the probability, is what is
-#: specified here and what the CenterNet reference implementation uses.
+#: constant and corresponds to p = 0.1, i.e. -log((1 - 0.1) / 0.1).
 HEAT_BIAS_INIT: float = -2.19
 
-#: Segmentation logit bias = log(p/(1-p)) at the measured hand-pixel prior of 2.75%
-#: (01_DATA.md s2.5 median hand-pixel fraction). Same reasoning as HEAT_BIAS_INIT.
+#: Segmentation logit bias = log(p/(1-p)) at the measured hand-pixel prior of 2.75%. Same reasoning as HEAT_BIAS_INIT.
 SEG_BIAS_INIT: float = -3.56
 
 _EPS: float = 1e-6
@@ -50,8 +45,7 @@ def _ch(c: int, width: float) -> int:
     """Scale a channel count by `width`, rounded to a multiple of 8 (minimum 8).
 
     Multiples of 8 keep every count even, which IBN-a needs (it halves the channels), and keep
-    the tensor cores happy. All nominal counts are already multiples of 8, so `width=1.0`
-    reproduces the table in 02_DESIGN.md s3.1 exactly.
+    the tensor cores happy. All nominal counts are already multiples of 8.
     """
     return max(8, int(round(c * width / 8.0)) * 8)
 
@@ -69,7 +63,7 @@ def _gn_groups(c: int, target: int = 32) -> int:
     """Group count for GroupNorm: `gcd(32, C)`.
 
     32 groups is the GN paper's default, but 24 and 48 channels (stem, stage 1) are not divisible
-    by 32. Rule used: take the largest divisor of C that also divides 32 -- equivalently the
+    by 32. Rule used: take the largest divisor of C that also divides 32 - equivalently the
     largest power of two <= 32 that divides C. Gives 32/32/32/16/8 for 320/192/96/48/24 and
     degrades gracefully for any `width`.
     """
@@ -80,7 +74,7 @@ class IBNorm(nn.Module):
     """IBN-a (Pan et al., ECCV 2018): InstanceNorm on half the channels, BatchNorm on the rest.
 
     IN removes per-image appearance statistics (illumination, colour cast, sensor response) --
-    exactly the RealSense-to-smartphone nuisance we are trying to survive -- while the BN half
+    exactly the RealSense-to-smartphone nuisance we are trying to survive - while the BN half
     keeps the discriminative content IN would otherwise wash out.
     """
 
@@ -113,7 +107,7 @@ def _norm1d(kind: str, c: int) -> nn.Module:
     For a tensor with no spatial axis, GroupNorm(g, C) and LayerNorm(C) differ only in the group
     count, and LayerNorm is exactly GroupNorm(1, C). LayerNorm is therefore used for "gn": it is
     the standard batch-independent 1-D choice and avoids inventing a second divisibility rule for
-    the head width. "bn" and "ibn" both use BatchNorm1d -- IBN-a is a convolutional construct
+    the head width. "bn" and "ibn" both use BatchNorm1d - IBN-a is a convolutional construct
     (per-image *spatial* statistics) and has no meaningful 1-D analogue.
     """
     if kind == "gn":
@@ -130,7 +124,7 @@ class BasicBlock(nn.Module):
     The shortcut is projected with a 1x1 conv (+ Norm) whenever the stride or channel count
     changes. When `use_ibn` is set (and `norm == "ibn"`) only the *first* norm is IBN: the IBN-a
     paper places IN on the residual branch's first normalisation and leaves the branch output --
-    the tensor that is added to the identity -- as pure BN, because normalising the merged
+    the tensor that is added to the identity - as pure BN, because normalising the merged
     identity path is what their IBN-b variant does and it costs accuracy.
     """
 
@@ -159,7 +153,7 @@ class BasicBlock(nn.Module):
 
 
 class HandNetEncoder(nn.Module):
-    """Residual backbone, 02_DESIGN.md s3.1.
+    """Residual backbone.
 
     `forward` returns the feature map of every level, coarsest last:
     `[stem(s2), stage1(s4), stage2(s8), stage3(s16), stage4(s32)]`. The U-Net decoder consumes
@@ -248,12 +242,12 @@ class HandNet(nn.Module):
 
     Args:
         n_classes: gesture classes (10 for this coursework).
-        norm: "bn" | "gn" | "ibn" -- the normalisation ablation (Block C in 02_DESIGN.md s8).
+        norm: "bn" | "gn" | "ibn" - the normalisation ablation.
         width: multiplier on every channel count.
         use_mask_attn_pool: mask-attended pooling in the classifier (s3.4). `False` is ablation
             A-MAP: global pooling alone, with a correspondingly narrower first Linear.
         heads: subset of ("det", "seg", "cls"). A head not listed builds no parameters and
-            contributes no key to the output dict (ablation A-MT). Must be non-empty -- a model
+            contributes no key to the output dict (ablation A-MT). Must be non-empty - a model
             with no outputs is a caller bug, not a configuration.
 
     Output dict, with (H, W) the input size and (Hs, Ws) = (H // 4, W // 4):
@@ -303,8 +297,7 @@ class HandNet(nn.Module):
             self.seg_out = nn.Conv2d(d2, 1, 1)
 
         if "det" in heads:
-            # Branch width = the stride-4 decoder width (64 at width=1.0); 02_DESIGN.md fixes the
-            # shape of each branch but not its hidden size.
+            # Branch width = the stride-4 decoder width (64 at width=1.0).
             self.heat_head = _det_branch(d4, 1)
             self.size_head = _det_branch(d4, 2)
             self.off_head = _det_branch(d4, 2)
@@ -372,8 +365,8 @@ class HandNet(nn.Module):
         if "det" in self.heads:
             nn.init.constant_(self.heat_head[-1].bias, HEAT_BIAS_INIT)
         if "seg" in self.heads:
-            # Same prior trick for the mask: the hand covers a median 2.75% of the image
-            # (01_DATA.md), so start the logit at log(0.0275 / 0.9725) rather than at 0.5
+            # Same prior trick for the mask: the hand covers a median 2.75% of the image,
+            # so start the logit at log(0.0275 / 0.9725) rather than at 0.5
             # probability. Saves the first epoch from unlearning a 50% foreground prior.
             nn.init.constant_(self.seg_out.bias, SEG_BIAS_INIT)
 
@@ -427,7 +420,7 @@ def decode_detection(out: dict[str, Tensor], k: int = 1) -> tuple[Tensor, Tensor
     `(x1, y1, x2, y2)`, clamped to the image.
 
     Shapes:
-        k == 1 -> boxes (B, 4), scores (B,)      [the frozen INTERFACES.md contract]
+        k == 1 -> boxes (B, 4), scores (B,)
         k >  1 -> boxes (B, k, 4), scores (B, k), peaks ordered by descending score.
 
     Image bounds are taken from `out["seg"]` when present (that map is at input resolution) and

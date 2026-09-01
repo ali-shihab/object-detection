@@ -60,7 +60,7 @@ JPEG_QUALITY = 95
 
 
 # --------------------------------------------------------------------------------------
-# pure helpers (exercised by the regression fixture described in docs/03_IMPLEMENTATION.md s5)
+# pure helpers
 # --------------------------------------------------------------------------------------
 def frame_index(name: str) -> int | None:
     """``frame_007.png`` -> 7.  Returns None for anything else (``.DS_Store`` and friends).
@@ -182,7 +182,7 @@ def subject_signature(root: Path) -> str:
     """Content signature of a contributor folder: sorted (relative path, size) pairs, hashed.
 
     Used to drop byte-identical duplicate submissions. The release contains
-    ``25150455_Guan`` and ``25150455_Guan 2`` -- same student number, 850 identical files each
+    ``25150455_Guan`` and ``25150455_Guan 2`` - same student number, 850 identical files each
     (verified by md5 of every PNG). Packing both double-weights that contributor in training and
     creates a subject-leakage hazard the moment a split puts one folder in train and the other in
     val. Signature-based detection catches this without name heuristics, so any future duplicate
@@ -201,7 +201,7 @@ def discover_clips(subject_root: Path, subject: str) -> list[dict]:
 
     Descends through wrapper directories first: one contributor packaged their submission as
     ``25047621_Wu/dataset/25047621_Wu/G01_call/...``. Matching only the immediate children
-    silently drops that whole contributor (750 frames) with no error -- which is exactly what
+    silently drops that whole contributor (750 frames) with no error - which is exactly what
     the first pack run did.
     """
     subject_root = find_dataset_root(subject_root)

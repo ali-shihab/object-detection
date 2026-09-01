@@ -1,12 +1,12 @@
 """Evaluation for the multi-task RGB hand model (COMP0248 CW1 LSA).
 
-Implements the metric set of `02_DESIGN.md` s9 (which is the brief's p9 list plus the extras
+Implements the metric set of s9 (which is the brief's p9 list plus the extras
 that make small ablation deltas interpretable):
 
-* detection      -- accuracy@0.5 IoU (also 0.75 / 0.9), mean box IoU
-* segmentation   -- hand IoU, background IoU, mIoU, Dice
-* classification -- top-1, macro-F1, per-class F1, 10x10 confusion matrix
-* calibration    -- ECE and a reliability curve for the required gesture confidence
+* detection      - accuracy@0.5 IoU (also 0.75 / 0.9), mean box IoU
+* segmentation   - hand IoU, background IoU, mIoU, Dice
+* classification - top-1, macro-F1, per-class F1, 10x10 confusion matrix
+* calibration    - ECE and a reliability curve for the required gesture confidence
 * every metric per-frame (headline) **and** per-clip, plus bootstrap 95% CIs over clips
 
 Two rules are enforced here rather than left to the caller:
@@ -15,7 +15,7 @@ Two rules are enforced here rather than left to the caller:
   and counted in ``n_boxes_skipped`` / ``n_seg_skipped``. Scoring a placeholder zero box as a
   miss would make 86% of the RealSense training frames look like detection failures.
 * Confidence intervals resample **clips**, not frames. The 15 frames of a clip have a median
-  consecutive mask IoU of 0.649 (`01_DATA.md`), so a frame-level bootstrap would report an
+  consecutive mask IoU of 0.649, so a frame-level bootstrap would report an
   interval several times narrower than the data supports.
 
 Usage
@@ -58,7 +58,7 @@ def expected_calibration_error(conf: np.ndarray, correct: np.ndarray, n_bins: in
     The brief requires the model to emit a gesture confidence (p5). A confidence that is never
     checked is decoration: ECE is the cheapest statement of whether the number means anything,
     and it is the natural place to see whether cross-camera transfer breaks calibration as well
-    as accuracy -- a model that is wrong *and* confident on phone images fails differently from
+    as accuracy - a model that is wrong *and* confident on phone images fails differently from
     one that is wrong and knows it.
     """
     conf = np.asarray(conf, dtype=np.float64)
@@ -119,7 +119,7 @@ def evaluate_model(model, loader, device, *, amp: bool = True,
                    collect_predictions: bool = False) -> dict:
     """Run the model over ``loader`` and return the full metric block.
 
-    ``pseudo_target=True`` applies the held-out phone-style shift of `02_DESIGN.md` s7.1 to
+    ``pseudo_target=True`` applies the held-out phone-style shift to
     each image. It is applied to the **de-normalised uint8 image and then re-normalised**,
     because the shift models an imaging pipeline that operates on 8-bit display-referred pixels;
     applying it to a normalised float tensor would be modelling nothing physical, and the
@@ -140,7 +140,7 @@ def evaluate_model(model, loader, device, *, amp: bool = True,
     t0 = time.time()
     # One generator for the whole pass, created outside the batch loop. Constructing it inside
     # restarts the draw sequence every batch, which makes the transform a frame receives depend
-    # on its position within its batch -- i.e. on --batch-size. A pseudo-target number reported
+    # on its position within its batch - i.e. on --batch-size. A pseudo-target number reported
     # at batch 32 would then not be the number model selection saw at batch 48.
     pt_rng = np.random.default_rng(1234)
 
@@ -247,7 +247,7 @@ def evaluate_model(model, loader, device, *, amp: bool = True,
 
             # Example selection is STRATIFIED, not "the first N the loader hands over".
             # The loader is unshuffled, so taking the first 24 gives 24 consecutive frames of
-            # one clip of one class -- which is what the first version of this figure did, and
+            # one clip of one class - which is what the first version of this figure did, and
             # it is useless as the brief's "qualitative overlays on a few val/test images".
             # Cap per class, and always keep room for mistakes: a qualitative figure showing
             # only successes tells the reader nothing about how the model fails.
@@ -373,7 +373,7 @@ def _code_hash() -> str:
 
 
 def compare_runs(paths: list[str], out_csv: str | None = None) -> list[dict]:
-    """Tidy one row per result JSON for the ablation tables of `02_DESIGN.md` s8."""
+    """Tidy one row per result JSON for the ablation tables of s8."""
     keys = ["det_acc@0.5", "mean_box_iou", "seg_iou_hand", "seg_miou", "seg_dice",
             "cls_top1", "cls_macro_f1", "cls_ece"]
     rows = []

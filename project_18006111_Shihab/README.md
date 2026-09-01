@@ -1,14 +1,10 @@
 # COMP0248 Coursework 1 (LSA) — Cross-Camera Hand Gesture Detection, Segmentation and Classification
 
-A single RGB-only network that, for one input image, predicts a hand bounding box, a binary hand
-mask, a gesture class from ten, and a gesture confidence. It is trained only on Intel RealSense
+A single RGB-only network that, for one input image, predicts a hand bounding box, a binary hand  
+mask, a gesture class from ten, and a gesture confidence. It is trained only on Intel RealSense  
 D455 frames and evaluated unchanged on smartphone photographs.
 
-Student number `18006111` (Shihab).
-
-**Code repository:** https://github.com/ali-shihab/object-detection
-The repository is public; the same link appears on page 1 of the report, as the brief requires
-(LSA p12).
+**Code repository:** [https://github.com/ali-shihab/object-detection](https://github.com/ali-shihab/object-detection)
 
 ---
 
@@ -19,8 +15,8 @@ project_18006111_Shihab/
 ├── smartphone_dataset/
 │   ├── 18006111_Shihab/          # the 60-frame smartphone test set (10 gestures x 2 clips x 3)
 │   │   └── G01_call/clip02/{rgb,annotation}/frame_001.png ...
-│   ├── raw_videos/               # source clips -- EXCLUDED from the submitted zip (size)
-│   └── RECORDING_GUIDE.md        # the intended capture protocol, with its deviation record
+│   └── raw_videos/               # source clips - excluded
+record
 ├── src/
 │   ├── utils.py                  # box ops, metrics, MetricAccumulator, seeding, IO
 │   ├── model.py                  # HandNet: encoder + U-Net decoder + centre-point head + classifier
@@ -41,7 +37,7 @@ project_18006111_Shihab/
 │   ├── e1_best.pt                # Experiment 1's checkpoint (run `e1`, EMA weights)
 │   └── e3_best.pt                # Experiment 3's checkpoint (run `e3`, EMA weights)
 ├── results/
-│   ├── <run>_<split>.json        # every metric the brief asks for, per run and split
+│   ├── <run>_<split>.json        # every metric, per run and split
 │   ├── <run>_<split>_predictions.csv  # per-image box IoU, mask IoU, class, confidence
 │   ├── figures/                  # confusion matrices, reliability diagrams, overlays, curves
 │   └── runs/<run>/               # each run's resolved config.json and per-epoch log.jsonl
@@ -50,24 +46,15 @@ project_18006111_Shihab/
 ```
 
 `weights/` holds two checkpoints because the brief's Experiment 2 reuses Experiment 1's: E2 is
-`e1_best.pt` evaluated on the smartphone set, not a third model. The names are the experiment's,
-not a run's -- `e3_best.pt` is the checkpoint of the run named `e3`. (`results/runs/` also lists a
+`e1_best.pt` evaluated on the smartphone set, not a third model. The names are the experiment's, not a run's - `e3_best.pt` is the checkpoint of the run named `e3`. (`results/runs/` also lists a
 separate run called `e3_best`; that is an ablation, and its checkpoint is not shipped.)
 
-The report shows one confusion matrix, because it is capped at six pages. The full set the brief
-asks for -- every mandatory experiment on val, RealSense test and the smartphone set -- is in
-`results/figures/cm_*.pdf`, alongside a reliability diagram per run.
+The report shows one confusion matrix, because it is capped at six pages. The full set the brief asks for - every mandatory experiment on val, RealSense test and the smartphone set - is in `results/figures/cm_*.pdf`, alongside a reliability diagram per run.
 
-Every command below runs from this directory. Everything needed to reproduce the results is
-here except the two things that cannot be: the supplied RealSense archives, which the brief
-forbids redistributing (§3 rebuilds the packed form from them), and the packed indexes derived
-from them (§5). The cluster orchestration scripts that drove the UCL GPU host are development
+Every command below runs from this directory. Everything needed to reproduce the results is  
+here except the two things that cannot be: the supplied RealSense archives, and the packed indexes derived  
+from them (§5). The cluster orchestration scripts that drove the UCL GPU host are development  
 infrastructure and are not required to run anything here.
-
-Source comments cite the project's design documents by name (`02_DESIGN.md`, `01_DATA.md`,
-`INTERFACES.md`, `03_IMPLEMENTATION.md`). Those are working material rather than deliverables and
-are deliberately not in this submission; every comment that cites one states its reasoning in
-full first, so nothing here depends on reading them.
 
 ## 2. Environment
 
@@ -81,10 +68,7 @@ The first §3 command reads the release as a `.7z` archive and shells out to the
 (`brew install p7zip` / `apt install p7zip-full`); pass an already-extracted directory instead and
 it is not needed. Nothing else here shells out.
 
-Results in the report were produced with Python 3.11.14, torch 2.6.0+cu124, on one NVIDIA
-RTX 4070 Ti SUPER (16 GB, sm_89) under Rocky Linux 9.8 — one of two UCL CS Knuckles GPU hosts the
-queue was split across. The code
-runs on CPU unchanged (pass `--device cpu`), just slowly.
+Results in the report were produced with Python 3.11.14, torch 2.6.0+cu124, on one NVIDIA RTX 4070 Ti SUPER (16 GB, sm_89) under Rocky Linux 9.8 - one of two UCL CS Knuckles GPU hosts the queue was split across. The code runs on CPU unchanged (pass `--device cpu`), just slowly.
 
 ## 3. Data preparation
 
@@ -105,13 +89,13 @@ python tools/pack_dataset.py --src "Test data-COMP0248_Test_data_23" \
 # the 60 extracted frames and their masks are shipped, so steps 1-3 need only be re-run to
 # rebuild the set from scratch.
 # Follows the Week-4 tutorial: SAM pre-annotation -> Label Studio refinement -> decode.
-# Step 1 -- frame extraction from the recordings:
+# Step 1 - frame extraction from the recordings:
 python tools/annotate_smartphone.py --videos smartphone_dataset/raw_videos \
     --out smartphone_dataset/18006111_Shihab
-# Step 2 -- SAM pre-annotation (annotation tooling only; see s8):
+# Step 2 - SAM pre-annotation (annotation tooling only; see s8):
 python tools/annotate_smartphone_sam.py --src smartphone_dataset/18006111_Shihab \
     --out _scratch/ls_work --sam-checkpoint sam_vit_b_01ec64.pth
-# Step 3 -- refine every mask by hand in Label Studio, then decode the JSON-MIN export.
+# Step 3 - refine every mask by hand in Label Studio, then decode the JSON-MIN export.
 #   The tutorial's convert_annotations_for_LS.py / process_LS_output.py do the two conversions.
 #   label-studio and label-studio-converter cannot coexist in one environment: install
 #   label-studio==1.13.1 in its own venv and run the converter elsewhere.
@@ -130,8 +114,7 @@ python -m src.train --config configs/e1.yaml --out runs/e1     # Experiment 1 ba
 python -m src.train --config configs/e3.yaml --out runs/e3     # Experiment 3 (+CPR)
 ```
 
-`configs/e1.yaml` and `configs/e3.yaml` differ in one substantive field, `photometric` --- plus
-`tag`, which is only the run's name and is read by nothing. So the E3-vs-E2 comparison is a
+`configs/e1.yaml` and `configs/e3.yaml` differ in one substantive field, `photometric` - plus `tag`, which is only the run's name and is read by nothing. So the E3-vs-E2 comparison is a
 statement about the augmentation and nothing else. Any field can be
 overridden on the command line, which is how the ablations are run:
 
@@ -150,14 +133,11 @@ python -m src.train --config configs/e3.yaml --out runs/no_giou --set w_giou=0.0
 python -m src.train --config configs/e1.yaml --out runs/warm5 --set warmup_epochs=5 --set min_lr_factor=0.05
 ```
 
-This exists so that no ablation has to be run by hand-editing a config file: every run writes
-its fully resolved configuration --- base file, config file and command-line overrides collapsed
-into one record --- to `runs/<name>/config.json`, so a run is reproducible from its own record
+This exists so that no ablation has to be run by hand-editing a config file: every run writes its fully resolved configuration - base file, config file and command-line overrides collapsed into one record - to `runs/<name>/config.json`, so a run is reproducible from its own record
 rather than from whatever the config file says today. All 39 of those records ship, under
 `results/runs/`.
 
-Training is resumable (`--resume auto`) and checkpoints every epoch — the GPU host can be
-reclaimed at any time. `--dry-run N` runs N steps plus one evaluation, as a smoke test.
+Training is resumable (`--resume auto`) and checkpoints every epoch - the GPU host can be reclaimed at any time. `--dry-run N` runs N steps plus one evaluation, as a smoke test.
 
 ## 5. Evaluation
 
@@ -197,9 +177,7 @@ files that produced it.
 
 ## 6. Figures
 
-The overlay dumps (`*_examples.npz`, ~13 MB each) are stripped from the zip for size. `--examples`
-is optional --- without it every figure but the qualitative overlay is drawn; the §5 evaluation
-command regenerates the dump it needs.
+The overlay dumps (`*_examples.npz`, ~13 MB each) are stripped from the zip for size. `--examples` is optional - without it every figure but the qualitative overlay is drawn; the §5 evaluation command regenerates the dump it needs.
 
 ```bash
 python -m src.visualise --results results/*.json --curves results/runs/e1/log.jsonl \
@@ -231,36 +209,12 @@ sparse-mask handling, and every augmentation's invariants.
 ## 7. Reproducibility notes
 
 - `--seed` fixes Python, numpy and torch RNGs; `deterministic: true` additionally forces
-  deterministic cuDNN kernels at some cost in speed.
+deterministic cuDNN kernels at some cost in speed.
 - DataLoader workers are seeded per worker *and* per epoch, so augmentation is reproducible
-  without every worker drawing the identical stream.
+without every worker drawing the identical stream.
 - The train/val split lives in `index.json`, not in the training code, so it cannot drift
-  between runs.
-- Model selection never touches smartphone data: checkpoints are selected on held-out RealSense
-  contributors, optionally scored through a synthetic held-out shift (`--select-on pseudo`).
-  The smartphone set is read once, at the end.
+between runs.
+- Model selection never touches smartphone data: checkpoints are selected on held-out RealSense  
+contributors, optionally scored through a synthetic held-out shift (`--select-on pseudo`).  
+The smartphone set is read once, at the end.
 
-## 8. Rules compliance
-
-The submitted model is written from scratch with `torch.nn` primitives. There is no
-`torchvision.models`, no `torchvision.ops`, no `timm`, no `segmentation_models_pytorch`, no
-Detectron2, MMDetection or Ultralytics anywhere in `src/` or `tools/`, and no pretrained weights
-are loaded — the network is trained from random initialisation. Box IoU, GIoU, peak suppression,
-Gaussian target rendering and every augmentation operation are implemented in this repository.
-One qualification, stated rather than buried. The smartphone ground-truth masks were built with
-`tools/annotate_smartphone_sam.py`, which loads a pretrained **Segment Anything** checkpoint and
-uses **MediaPipe**'s hand landmarker to place SAM's prompt. (`tools/annotate_smartphone.py` also
-carries an optional SAM backend behind `--backend sam`; it was not used for the shipped masks and
-is subject to everything said here.) Both are **annotation tooling**: they
-run once, offline, to produce ground truth. Neither is imported by `src/`, runs at training or
-inference time, or contributes to any reported prediction — the restrictions the brief imposes are
-on the *submitted model*, which loads no pretrained weights of any kind.
-
-This is the pipeline the course prescribes. The Week-4 tutorial
-(`Realsense_datacollection_n_annotation.pdf`, Part 3) instructs students to pre-annotate with SAM3
-in Colab and refine in Label Studio, and the RealSense masks this project trains and evaluates
-against were produced that way. Two substitutions are recorded: SAM 1 stands in for SAM3, whose
-weights are gated behind a manual approval form; and because SAM 1 is promptable by points and
-boxes rather than text, MediaPipe supplies the prompt SAM3 would have taken from the word "hand".
-MediaPipe contributes no pixels to any mask. Every one of the 60 masks was then reviewed by hand in
-Label Studio and 42 were corrected.

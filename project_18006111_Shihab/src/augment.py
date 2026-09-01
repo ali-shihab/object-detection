@@ -2,17 +2,17 @@
 
 Scope
 -----
-Implements `02_DESIGN.md` s6 (geometric), s7 (Camera-Pipeline Randomisation) and s8 block D
-(competing randomisers).  Nothing here imports ``torchvision``: every operation is written
-against numpy / OpenCV / PIL, which is what the brief requires (LSA p10-p11).
+Implements geometric, Camera-Pipeline Randomisation and competing randomisers.
+Nothing here imports ``torchvision``: every operation is written
+against numpy / OpenCV / PIL, which is what the brief requires.
 
 Conventions
 -----------
 * Images are ``uint8 (H,W,3)`` **RGB** on the way in and out.  OpenCV is BGR-native, so every
   cv2 call that cares about channel order (only the JPEG codec does) converts explicitly.
-* Masks are ``uint8 (H,W)`` with values ``{0,255}``, binarised at 128 (`01_DATA.md` s2).
+* Masks are ``uint8 (H,W)`` with values ``{0,255}``, binarised at 128 .
 * Boxes are ``float32 (4,)`` ``(x1,y1,x2,y2)`` with **exclusive** ``x2/y2``, absolute pixels in
-  the frame of the image they accompany -- the convention fixed by ``src/utils``.
+  the frame of the image they accompany - the convention fixed by ``src/utils``.
 
 Sizing contract (matters for the dataloader)
 --------------------------------------------
@@ -20,9 +20,7 @@ The geometric block returns the **raw crop**, at whatever size the random-resize
 rectangle happens to be; it does *not* resize back.  The "resized" half of random-resized-crop
 is completed by the dataloader's single resize to ``img_size``.  That keeps the whole pipeline
 to exactly one resampling step for the crop plus one warp for the rotation, instead of the
-crop->resize->resize double resample a size-preserving policy would force.  It is also why
-`02_DESIGN.md` s5 packs at 512x384 rather than 384x288: at ``scale>=0.56`` the crop is still a
-downsample at the final 384x288.
+crop->resize->resize double resample a size-preserving policy would force.
 
 Worker seeding (read this before touching ``_rng``)
 ---------------------------------------------------
@@ -32,9 +30,9 @@ augmentation and the effective augmentation diversity silently drops by a factor
 ``_rng`` therefore (re)builds the generator whenever
 ``(os.getpid(), worker_id, torch.initial_seed())`` changes:
 
-* ``os.getpid()``    -- forces a rebuild inside a forked child, so no stream is ever shared.
-* ``worker_id``      -- decorrelates workers within one epoch.
-* ``torch.initial_seed()`` -- DataLoader sets this to ``base_seed + worker_id`` with a fresh
+* ``os.getpid()``    - forces a rebuild inside a forked child, so no stream is ever shared.
+* ``worker_id``      - decorrelates workers within one epoch.
+* ``torch.initial_seed()`` - DataLoader sets this to ``base_seed + worker_id`` with a fresh
   ``base_seed`` drawn from the loader's generator **every epoch**, so the stream also changes
   from epoch to epoch even when ``persistent_workers=False`` re-forks identical workers.  Seed
   the loader's ``generator`` and the whole thing is reproducible run to run.
@@ -71,7 +69,7 @@ __all__ = [
     "pseudo_target_transform",
 ]
 
-# Stage names for `02_DESIGN.md` s7, in pipeline order.  Frozen by INTERFACES.md.
+# Stage names, in pipeline order.
 CPR_STAGES: tuple[str, ...] = (
     "wb", "exposure", "ccm", "noise", "gamma", "tone",
     "satihue", "sharpblur", "resample", "jpeg", "chroma",
@@ -106,7 +104,7 @@ _NOISE_BANK_N = 1 << 21  # 2M float32 = 8 MB per worker; see _NoiseBank
 # colour primitives (shared deliberately by the E1 jitter baseline and CPR stage 8)
 # ======================================================================================
 def _saturation_matrix(s: float) -> np.ndarray:
-    """SVG ``feColorMatrix type="saturate"`` -- scales chroma about the luma axis."""
+    """SVG ``feColorMatrix type="saturate"`` - scales chroma about the luma axis."""
     return np.array([
         [_LUM_R + (1 - _LUM_R) * s, _LUM_G * (1 - s), _LUM_B * (1 - s)],
         [_LUM_R * (1 - s), _LUM_G + (1 - _LUM_G) * s, _LUM_B * (1 - s)],
@@ -115,7 +113,7 @@ def _saturation_matrix(s: float) -> np.ndarray:
 
 
 def _hue_matrix(turns: float) -> np.ndarray:
-    """SVG ``feColorMatrix type="hueRotate"`` -- rotation of the chroma plane by ``turns``.
+    """SVG ``feColorMatrix type="hueRotate"`` - rotation of the chroma plane by ``turns``.
 
     Deliberately *not* an HSV-cone hue shift.  A round trip through ``cv2.cvtColor`` costs
     3.3 ms on a 512x384 float32 frame against 0.20 ms for a 3x3 ``cv2.transform``; at 16x the
@@ -173,8 +171,8 @@ def _tone_lut(rng: np.random.Generator, strength: float) -> np.ndarray:
 class _NoiseBank:
     """Pool of N(0,1) samples, read back through random windows.
 
-    Drawing a fresh 512x384x3 Gaussian field costs ~6 ms -- more than the entire rest of the
-    CPR chain -- so the stage would dominate the dataloader.  A per-worker pool sampled at a
+    Drawing a fresh 512x384x3 Gaussian field costs ~6 ms - more than the entire rest of the
+    CPR chain - so the stage would dominate the dataloader.  A per-worker pool sampled at a
     random offset costs ~1 us.  The noise is i.i.d. *within* a frame, which is what stage 5
     models; across frames two windows overlap only by chance (2M-element pool, ~1.5M distinct
     offsets), and the field is subsequently scaled by a per-pixel signal-dependent sigma and
@@ -193,7 +191,7 @@ class _NoiseBank:
 
 
 # ======================================================================================
-# geometric block (02_DESIGN.md s6)
+# geometric block
 # ======================================================================================
 def _crop_params(h: int, w: int, rng: np.random.Generator, scale: tuple[float, float],
                  ratio: tuple[float, float]) -> tuple[int, int] | None:
@@ -219,11 +217,11 @@ def geometric_transform(
     Args:
         min_visible: reject a crop that keeps less than this fraction of the *original* mask
             area.  Default 0.5.  The class label is clip-level, so a crop that keeps a sliver
-            of palm still carries the label "three" -- half the hand is the point below which
+            of palm still carries the label "three" - half the hand is the point below which
             the gesture stops being identifiable and the sample becomes label noise.  Raising
             it towards 1.0 collapses random-resized-crop to a near-identity centre crop;
-            1.3 % of real frames are already border-truncated (`01_DATA.md` s2.5), so partial
-            hands are in-distribution and a value near 0 is not obviously wrong either -- it is
+            1.3 % of real frames are already border-truncated, so partial
+            hands are in-distribution and a value near 0 is not obviously wrong either - it is
             a parameter precisely because the right value is arguable.
         max_attempts: bounded rejection sampling; on exhaustion the identity crop is used, so
             the function always returns something valid.
@@ -349,7 +347,7 @@ def color_jitter(img: np.ndarray, rng: np.random.Generator, strength: float = 1.
 
 def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None = None,
         strength: float = 1.0) -> np.ndarray:
-    """Camera-Pipeline Randomisation, `02_DESIGN.md` s7.  Photometric only.
+    """Camera-Pipeline Randomisation.  Photometric only.
 
     ``stages=None`` runs all of :data:`CPR_STAGES`; any subset runs only those (this is what
     drives the block-B leave-one-out ablation).  Stage 1 (sRGB->linear) and the *return* to
@@ -358,13 +356,13 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
     later stage still sees a display-referred image.  That is what makes each named stage
     genuinely removable without breaking its successors.
 
-    Clamping.  Values are clamped to [0,1] exactly once in linear light -- on the way out of
-    it, before the display encode -- because that is where a real sensor clips (the ADC) and
+    Clamping.  Values are clamped to [0,1] exactly once in linear light - on the way out of
+    it, before the display encode - because that is where a real sensor clips (the ADC) and
     because the CCM and the noise can drive a channel negative, which a fractional power turns
     into NaN.  Between stages 2 and 5 nothing is clamped: highlights above 1.0 there are
     physically meaningful headroom, and clipping them early would flatten every bright region
     before the tone curve ever sees it.  In display space each stage that can overshoot --
-    saturation, unsharp, bicubic/Lanczos ringing -- clamps itself, so the uint8 conversion at
+    saturation, unsharp, bicubic/Lanczos ringing - clamps itself, so the uint8 conversion at
     the end never has to saturate.
     """
     on = set(CPR_STAGES) if stages is None else set(stages)
@@ -373,7 +371,7 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
         # A short-circuit, not a scaled-to-nothing chain.  Two stages have no identity element
         # inside their specification: the JPEG quality range tops out at 95, which is lossy
         # (~60 levels of ringing on a hard edge), and a chromatic-aberration shift is +/-1 px
-        # or nothing -- there is no smaller shift.  Scaling their parameters toward zero
+        # or nothing - there is no smaller shift.  Scaling their parameters toward zero
         # therefore lands on "mildest", not "identity", so strength 0 is defined as the block
         # being switched off.  The corollary is worth knowing for the s7.1 strength sweep:
         # strength interpolates the *continuous* stages only; the two discrete ones sit at
@@ -381,10 +379,10 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
         # ``cpr_stages``.
         return img.copy()
 
-    # -- stage 1: sRGB -> linear (fused with the uint8 -> float32 conversion) ------------
+    # - stage 1: sRGB -> linear (fused with the uint8 -> float32 conversion) ------------
     x = cv2.LUT(img, _SRGB_TO_LINEAR)
 
-    # -- stages 2-4: white balance, exposure, CCM.  All three are linear maps, so they are
+    # - stages 2-4: white balance, exposure, CCM.  All three are linear maps, so they are
     #    folded into one 3x3 and applied with a single cv2.transform.  Folding costs nothing
     #    in fidelity and keeps each one independently skippable.
     m = np.eye(3, dtype=np.float32)
@@ -403,7 +401,7 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
     if not np.array_equal(m, np.eye(3, dtype=np.float32)):
         x = cv2.transform(x, m)
 
-    # -- stage 5: signal-dependent (shot + read) noise ----------------------------------
+    # - stage 5: signal-dependent (shot + read) noise ----------------------------------
     if "noise" in on and rng.random() < 0.5:
         a = float(np.exp(rng.uniform(math.log(1e-5), math.log(1e-3)))) * s
         b = float(np.exp(rng.uniform(math.log(1e-6), math.log(1e-4)))) * s
@@ -416,11 +414,11 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
 
     np.clip(x, 0.0, 1.0, out=x)   # the ADC clips; also, a fractional power of a negative is NaN
 
-    # -- stages 6 + 7: linear -> display gamma, then the monotone tone curve.  Both are
+    # - stages 6 + 7: linear -> display gamma, then the monotone tone curve.  Both are
     #    per-pixel scalar maps, so they are evaluated once into a single 256-entry table
     #    instead of twice over the image.  The image is quantised into a **gamma-2.0 code**
     #    (one cheap SIMD sqrt) rather than a linear one: 8 bits of *linear* light bands the
-    #    shadows badly -- linear step 1/255 is display level 37 -- whereas a gamma-2.0 code has
+    #    shadows badly - linear step 1/255 is display level 37 - whereas a gamma-2.0 code has
     #    essentially sRGB's shadow precision, which is all the uint8 input ever carried.  The
     #    residual exponent 2/gamma then rides in the table.  This replaces a 1.25 ms
     #    transcendental pass over the frame with ~5 us of table building.
@@ -430,18 +428,18 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
     lut = _tone_curve(rng, s, code) if "tone" in on else code.astype(np.float32)
     x = cv2.LUT(cv2.convertScaleAbs(x, alpha=255.0), lut)
 
-    # -- stage 8: vendor colour rendering (saturation + hue), one composed matrix -------
+    # - stage 8: vendor colour rendering (saturation + hue), one composed matrix -------
     # Saturation is drawn from U(0.6, 1.3), NOT the U(0.6, 1.5) of the design table.
     # The held-out pseudo-target shift (s7.1) applies saturation x1.4; leaving 1.5 as the upper
     # bound would put the pseudo-target inside CPR's reachable set and make target-free model
-    # selection circular. Narrowed deliberately -- see docs/02_DESIGN.md s7 note.
+    # selection circular. Narrowed deliberately.
     if "satihue" in on:
         mm, bb = _compose(
             (_saturation_matrix(1.0 + s * (float(rng.uniform(0.6, 1.3)) - 1.0)), np.zeros(3, np.float32)),
             (_hue_matrix(s * float(rng.uniform(-0.05, 0.05))), np.zeros(3, np.float32)))
         x = np.clip(_apply_colour(x, mm, bb), 0.0, 1.0)
 
-    # -- stage 9: sharpening vs soft optics.  Two-sided by construction (s7 "Bidirectionality"):
+    # - stage 9: sharpening vs soft optics.  Two-sided by construction (s7 "Bidirectionality"):
     #    exactly one of the two fires, so the policy covers "phone is sharper than RealSense"
     #    as well as the usual degradation direction.
     if "sharpblur" in on:
@@ -454,7 +452,7 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
             x = np.clip(cv2.addWeighted(x, 1.0 + amt, cv2.GaussianBlur(x, _ksize(sg), sg), -amt, 0.0),
                         0.0, 1.0)
 
-    # -- stage 10: resolution / resampling mismatch, kernel randomised on both legs -----
+    # - stage 10: resolution / resampling mismatch, kernel randomised on both legs -----
     if "resample" in on and rng.random() < 0.5:
         h, w = x.shape[:2]
         f = 1.0 + s * (float(rng.uniform(1.0, 2.0)) - 1.0)
@@ -467,11 +465,11 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
                                interpolation=up), 0.0, 1.0)
 
     # Invariant from here on: x is float32 in [0,1].  Every stage above either preserves the
-    # range (LUT, Gaussian blur -- a convex combination) or clips explicitly, so the uint8
+    # range (LUT, Gaussian blur - a convex combination) or clips explicitly, so the uint8
     # conversion below never has to saturate and cv2.convertScaleAbs' abs() is never reached.
     out = cv2.convertScaleAbs(x, alpha=255.0)
 
-    # -- stage 11: JPEG re-encode.  cv2 is BGR-native and JPEG luma is 0.299R+0.587G+0.114B,
+    # - stage 11: JPEG re-encode.  cv2 is BGR-native and JPEG luma is 0.299R+0.587G+0.114B,
     #    so feeding RGB in as BGR would put the chroma subsampling on the wrong channel.
     if "jpeg" in on and rng.random() < 0.5:
         q = int(np.clip(round(95 - s * (95 - float(rng.uniform(40, 95)))), 1, 100))
@@ -480,7 +478,7 @@ def cpr(img: np.ndarray, rng: np.random.Generator, stages: Iterable[str] | None 
         if ok:
             out = cv2.cvtColor(cv2.imdecode(buf, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
 
-    # -- stage 12: lateral chromatic aberration, approximated as opposed +/-1 px R/B shifts.
+    # - stage 12: lateral chromatic aberration, approximated as opposed +/-1 px R/B shifts.
     #    Real lateral CA is radial (per-channel magnification); a uniform shift is the standard
     #    cheap stand-in and is indistinguishable from it over a 384 px frame at +/-1 px.
     if "chroma" in on and rng.random() < 0.2:
@@ -529,10 +527,10 @@ def _bank(rng: np.random.Generator) -> _NoiseBank:
 
 
 # ======================================================================================
-# competing randomisers (02_DESIGN.md s8 block D)
+# competing randomisers
 # ======================================================================================
 def randconv(img: np.ndarray, rng: np.random.Generator, strength: float = 1.0) -> np.ndarray:
-    """RandConv -- Xu et al., "Robust and Generalizable Visual Representation Learning via
+    """RandConv - Xu et al., "Robust and Generalizable Visual Representation Learning via
     Random Convolutions", ICLR 2021.  Random-weight k x k conv, k ~ U{1,3}, He-scaled, output
     mixed with the input by alpha ~ U(0,1)."""
     x = cv2.LUT(img, _U8_TO_F32)
@@ -553,7 +551,7 @@ def randconv(img: np.ndarray, rng: np.random.Generator, strength: float = 1.0) -
 
 
 def aprs(img: np.ndarray, rng: np.random.Generator, strength: float = 1.0) -> np.ndarray:
-    """APR-S -- Chen et al., "Amplitude-Phase Recombination", ICCV 2021.  Keep the phase
+    """APR-S - Chen et al., "Amplitude-Phase Recombination", ICCV 2021.  Keep the phase
     spectrum of the image, take the amplitude spectrum of a randomly augmented copy of it."""
     x = cv2.LUT(img, _U8_TO_F32)
     y = cv2.LUT(_pil_pool(img, rng, n=2), _U8_TO_F32)
@@ -567,7 +565,7 @@ def aprs(img: np.ndarray, rng: np.random.Generator, strength: float = 1.0) -> np
 # AugMix's *published* operation set: it deliberately omits contrast, colour, brightness,
 # sharpness, noise and blur so that ImageNet-C stays a clean held-out benchmark.  Those are
 # exactly the nuisance variables that separate a RealSense frame from a phone frame, which is
-# why D4 is included -- as a method that structurally cannot cover our shift.  Adding the
+# why D4 is included - as a method that structurally cannot cover our shift.  Adding the
 # missing ops would destroy the point of running it.
 def _autocontrast(im: Image.Image, _l: float, _r) -> Image.Image: return ImageOps.autocontrast(im)
 def _equalize(im: Image.Image, _l: float, _r) -> Image.Image: return ImageOps.equalize(im)
@@ -613,7 +611,7 @@ _AUGMIX_OPS: tuple[Callable, ...] = (
 )
 
 #: The four label-safe members of the published set. Used when a mask or box must stay in sync
-#: with the image -- see ``augmix``. Note that these four still exclude contrast, colour,
+#: with the image - see ``augmix``. Note that these four still exclude contrast, colour,
 #: brightness, sharpness, noise and blur, so the property D4 is cited for survives the
 #: restriction: AugMix structurally cannot cover a camera-pipeline shift either way.
 _AUGMIX_PHOTOMETRIC_OPS: tuple[Callable, ...] = (
@@ -623,7 +621,7 @@ _AUGMIX_PHOTOMETRIC_OPS: tuple[Callable, ...] = (
 
 def _pil_pool(img: np.ndarray, rng: np.random.Generator, n: int = 1,
               geometric: bool = True) -> np.ndarray:
-    """``n`` random ops from the AugMix set -- also APR-S's "augmented copy" generator.
+    """``n`` random ops from the AugMix set - also APR-S's "augmented copy" generator.
 
     ``geometric=False`` restricts the draw to the four photometric ops. See ``augmix``.
     """
@@ -637,12 +635,12 @@ def _pil_pool(img: np.ndarray, rng: np.random.Generator, n: int = 1,
 def augmix(img: np.ndarray, rng: np.random.Generator, strength: float = 1.0,
            width: int = 3, depth: int = -1, severity: int = 3,
            geometric: bool = True) -> np.ndarray:
-    """AugMix -- Hendrycks et al., ICLR 2020.  Dirichlet-weighted mix of ``width`` op chains.
+    """AugMix - Hendrycks et al., ICLR 2020.  Dirichlet-weighted mix of ``width`` op chains.
 
     **Documented deviation, applied whenever a mask or box accompanies the image.**  Five of the
     nine published ops are geometric (rotate, shear x/y, translate x/y).  AugMix mixes several
     independently-augmented branches with Dirichlet weights, so there is no single geometry to
-    apply to the label -- the mixed image is a superposition of differently-warped copies.
+    apply to the label - the mixed image is a superposition of differently-warped copies.
     Applying them image-only leaves the mask and box describing content that has moved (measured
     displacement up to 25 px), which is not a caveat but label noise: it would corrupt the
     detection and segmentation targets of the D4 ablation and make its numbers uninterpretable
@@ -650,10 +648,8 @@ def augmix(img: np.ndarray, rng: np.random.Generator, strength: float = 1.0,
 
     So when the caller has a label to protect (``geometric=False``, set automatically by
     ``AugmentPolicy`` whenever a mask or box is present) the draw is restricted to the four
-    photometric ops.  The classification-only case keeps the published set.  This is stated in
-    `02_DESIGN.md` s8 block D so the D4 result is read with the deviation in view: the remaining
-    four ops still exclude contrast, colour, brightness, sharpness, noise and blur, which is the
-    property D4 is cited for.
+    photometric ops.  The classification-only case keeps the published set.  The remaining
+    four ops still exclude contrast, colour, brightness, sharpness, noise and blur.
     """
     x = cv2.LUT(img, _U8_TO_F32)
     ws = rng.dirichlet([1.0] * width).astype(np.float32)
@@ -666,20 +662,20 @@ def augmix(img: np.ndarray, rng: np.random.Generator, strength: float = 1.0,
 
 
 # ======================================================================================
-# held-out pseudo-target transform (02_DESIGN.md s7.1)
+# held-out pseudo-target transform
 # ======================================================================================
-# DELIBERATE DUPLICATION.  Everything below is written standalone -- its own literal control
-# points, its own saturation matrix, its own unsharp arithmetic -- and calls no CPR helper.
+# DELIBERATE DUPLICATION.  Everything below is written standalone - its own literal control
+# points, its own saturation matrix, its own unsharp arithmetic - and calls no CPR helper.
 # If it reused `_tone_lut` or `_saturation_matrix`, the "held-out transform family" claim in
 # s7.1 would be false: CPR could generate the exact operating point that all CPR strength and
 # variant selection is scored against, and the target-free protocol would be circular.
-# The S-curve is deliberately *stronger than CPR can draw* -- as a whole curve, not point by
+# The S-curve is deliberately *stronger than CPR can draw* - as a whole curve, not point by
 # point.  Over 200 CPR draws no draw tracks the composed pseudo-target transfer curve to within
 # 0.04 at every input level (closest 0.067), and that whole-curve separation is what
 # tests/test_augment.py asserts.  At either individual control point the pseudo-target value is
 # still inside CPR's realisable range: CPR spans [0.098, 0.447] at input 0.25 where this table
 # sits at 0.110, and [0.503, 0.979] at 0.75 where it sits at 0.890.  Without the whole-curve
-# margin the "held-out family" is only held out on paper -- a 2000-draw search over CPR's
+# margin the "held-out family" is only held out on paper - a 2000-draw search over CPR's
 # stage 7 found curves within 0.015 of an earlier, milder version of this table.
 _PT_TONE_X = np.array([0.00, 0.10, 0.25, 0.50, 0.75, 0.90, 1.00])
 _PT_TONE_Y = np.array([0.00, 0.030, 0.110, 0.500, 0.890, 0.970, 1.00])
@@ -693,7 +689,7 @@ _PSEUDO_SAT_M: np.ndarray = np.array([  # saturate(1.4), written out rather than
 
 
 def pseudo_target_transform(img: np.ndarray, rng: np.random.Generator | None = None) -> np.ndarray:
-    """The held-out shift used for target-free model selection (`02_DESIGN.md` s7.1).
+    """The held-out shift used for target-free model selection.
 
     Fixed phone-style tone curve -> 2x bicubic up-resample (and back, because the caller feeds
     the result straight to the model and the size must not change) -> strong unsharp mask ->
@@ -723,7 +719,7 @@ def pseudo_target_transform(img: np.ndarray, rng: np.random.Generator | None = N
 # policy
 # ======================================================================================
 class AugmentPolicy:
-    """Geometric block + one photometric block, per `INTERFACES.md`.
+    """Geometric block + one photometric block.
 
     Args:
         geometric: run the s6 crop/rotate/flip block.
@@ -734,7 +730,7 @@ class AugmentPolicy:
             perfectly plausible but wrong ablation number.
         strength: scales every sampled *photometric* magnitude about its identity value
             (probabilities are left alone); ``0.0`` switches the photometric block off exactly
-            -- see :func:`cpr` for why that has to be a switch rather than a limit.  The geometric block
+            - see :func:`cpr` for why that has to be a switch rather than a limit.  The geometric block
             is deliberately **not** scaled by it: ``strength`` is the knob the s7.1 pseudo-target
             protocol sweeps to pick a CPR operating point, and letting it also widen or narrow
             the crop and rotation ranges would confound that sweep with a geometry change.
@@ -762,7 +758,7 @@ class AugmentPolicy:
         self._gen: np.random.Generator | None = None
 
     def _rng(self) -> np.random.Generator:
-        """Per-(process, worker, epoch) generator -- see the module docstring."""
+        """Per-(process, worker, epoch) generator - see the module docstring."""
         info = _get_worker_info()
         wid = -1 if info is None else int(info.id)
         tseed = int(torch.initial_seed()) if torch is not None else 0
@@ -771,7 +767,7 @@ class AugmentPolicy:
             self._key = key
             # The pid is a *cache key only* and is deliberately absent from the entropy: it
             # changes between runs, and putting it in the seed would make every run
-            # irreproducible -- the opposite of the bug the pid is here to catch.
+            # irreproducible - the opposite of the bug the pid is here to catch.
             self._gen = np.random.default_rng(np.random.SeedSequence(
                 [self.seed & 0xFFFFFFFF, wid & 0xFFFFFFFF, tseed & 0xFFFFFFFFFFFFFFFF]))
         return self._gen

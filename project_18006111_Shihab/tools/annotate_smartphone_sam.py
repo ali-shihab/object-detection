@@ -54,7 +54,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# RealSense hand-area reference band, measured over all 3,450 test masks (docs/01_DATA.md s2.4):
+# RealSense hand-area reference band, measured over all 3,450 test masks:
 # median 2.75 % of the frame, p05 1.59 %, p95 4.73 %. Used only to FLAG frames for the manual
 # pass -- nothing is rejected automatically, because a phone held closer than the RealSense rig
 # legitimately produces a larger hand.
@@ -124,11 +124,11 @@ def main(argv=None) -> int:
     ap.add_argument("--hand-model", default="hand_landmarker.task",
                     help="MediaPipe hand_landmarker.task")
     ap.add_argument("--no-wrist-cut", action="store_true",
-                    help="skip stage 3 (kept for the ablation in docs/01_DATA.md)")
+                    help="skip stage 3 (kept for the ablation)")
     a = ap.parse_args(argv)
 
     import mediapipe as mp
-    cv2.setNumThreads(1)                       # see docs/03_IMPLEMENTATION.md I2
+    cv2.setNumThreads(1)                   
 
     src = Path(a.src)
     images = Path(a.out) / "dataset/labelling/images"
@@ -200,8 +200,7 @@ def main(argv=None) -> int:
     flagged = sum(1 for r in report if r.get("flags"))
     print(f"\n{len(report)} frames; {flagged} flagged for the manual pass; "
           f"{sum(1 for r in report if not r['detected'])} with no hand detected")
-    print(f"next: convert_annotations_for_LS.py -> Label Studio -> process_LS_output.py "
-          f"(see README.md s3)")
+    print(f"next: convert_annotations_for_LS.py -> Label Studio -> process_LS_output.py ")
     return 0
 
 

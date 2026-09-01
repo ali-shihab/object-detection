@@ -1,6 +1,6 @@
 """Shared utilities: geometry, heatmap targets, metrics, bookkeeping.
 
-Everything here is implemented from scratch -- no ``torchvision.ops``, no detection or
+Everything here is implemented from scratch - no ``torchvision.ops``, no detection or
 segmentation library. The conventions fixed in this module are relied on by ``dataloader``,
 ``model``, ``train`` and ``evaluate``, so they are stated explicitly in the docstrings.
 
@@ -148,12 +148,12 @@ def mask_to_box(mask: np.ndarray, thresh: int = 128) -> np.ndarray | None:
 
     Args:
         mask: ``(H, W)`` array. ``thresh`` is in the *units of the array*: the released masks
-            are ``uint8`` and are binarised at 128 (`01_DATA.md` s2); a float ``{0,1}`` mask
+            are ``uint8`` and are binarised at 128; a float ``{0,1}`` mask
             must be passed with ``thresh=0.5``.
 
     Returns:
-        ``(4,) float32`` ``(x1, y1, x2, y2)`` with exclusive ``x2``/``y2`` -- ``x2 - x1`` is the
-        number of foreground columns and ``y2 - y1`` the number of foreground rows -- or
+        ``(4,) float32`` ``(x1, y1, x2, y2)`` with exclusive ``x2``/``y2`` - ``x2 - x1`` is the
+        number of foreground columns and ``y2 - y1`` the number of foreground rows - or
         ``None`` when the mask has no foreground pixel at all.
     """
     m = np.asarray(mask)
@@ -220,7 +220,7 @@ def gaussian_radius(h: float, w: float, min_overlap: float = 0.7) -> float:
     Three configurations are solved and the minimum taken: (1) both corners displaced the same
     way (box translated), (2) the box shrunk by ``r`` on every side, (3) the box grown by ``r``
     on every side. Each is a quadratic in ``r``; we take the **smallest non-negative root**,
-    which is the mathematically correct one -- the widely copied CornerNet/CenterNet snippet
+    which is the mathematically correct one - the widely copied CornerNet/CenterNet snippet
     uses ``(b + sqrt(d)) / 2`` for cases 1 and 2, which returns the *larger* root and forgets
     the ``/(2a)``, and so over-estimates the radius (e.g. 9.76 instead of 8.17 px for a
     100x100 box at overlap 0.7). Negative discriminants are clamped to 0.
@@ -273,15 +273,14 @@ def seg_scores(pred: Tensor, tgt: Tensor) -> dict[str, Tensor]:
     """Per-image binary segmentation scores.
 
     Args:
-        pred: ``(N,1,H,W)`` probability in ``[0,1]``, thresholded at 0.5 (`02_DESIGN.md` s9).
+        pred: ``(N,1,H,W)`` probability in ``[0,1]``, thresholded at 0.5.
         tgt: ``(N,1,H,W)`` in ``{0,1}`` (ground-truth masks are binarised at 128 upstream).
 
     Returns:
         ``{"iou_hand", "iou_bg", "miou", "dice"}``, each a ``(N,)`` float32 tensor.
         ``miou`` is the mean of the two class IoUs; ``dice`` is on the hand class only.
 
-    Edge cases (a real choice, stated because `01_DATA.md` records 0 empty masks in the test
-    release but the smartphone set is not yet collected):
+    Edge cases:
       * no ground-truth hand **and** no predicted hand -> ``iou_hand = dice = 1.0``
         (a correct prediction of "nothing here" scores as perfect, not as zero);
       * exactly one of the two empty -> ``iou_hand = dice = 0.0``;
@@ -316,18 +315,18 @@ _SEG_KEYS: tuple[str, ...] = ("miou", "iou_hand", "iou_bg", "dice")
 
 
 class MetricAccumulator:
-    """Streams one record per frame and produces the full metric set of `02_DESIGN.md` s9.
+    """Streams one record per frame and produces the full metric set.
 
     Aggregation:
-      * ``frame`` -- every frame weighted equally (the headline numbers);
-      * ``clip``  -- each metric averaged *within* a ``clip_key`` first and then across clips,
+      * ``frame`` - every frame weighted equally (the headline numbers);
+      * ``clip``  - each metric averaged *within* a ``clip_key`` first and then across clips,
         so the 15 correlated frames of a clip count once. For the F1-family (which does not
         decompose per frame) the same principle is applied to the confusion matrix: a frame
         contributes ``1 / frames-in-its-clip`` counts, so each clip carries total weight 1 and
         ``cls_top1`` equals the mean of the per-clip accuracies. ``per_class_support`` in the
         clip block is therefore a clip count (fractional only if a clip mixes labels).
 
-    Exclusions -- never silently zero:
+    Exclusions - never silently zero:
       * ``box_iou=None`` (no usable ground-truth box: ``has_mask`` false or an empty mask) is
         dropped from ``det_acc@0.5`` and ``mean_box_iou``; ``n_boxes_scored`` reports the
         denominator actually used and ``n_boxes_skipped`` the number dropped.
@@ -337,7 +336,7 @@ class MetricAccumulator:
 
     F1 convention: macro-F1 is the unweighted mean of per-class F1 over **all** ``n_classes``
     classes, and a class with zero support and zero predictions contributes ``F1 = 0.0``. This
-    is deliberate -- it keeps macro-F1 comparable across splits with different class coverage
+    is deliberate - it keeps macro-F1 comparable across splits with different class coverage
     and refuses to reward a model for a class it was never asked about. Empty accumulators
     return ``0.0`` everywhere (never NaN) so ``summary()`` is always strict-JSON serialisable.
     """
